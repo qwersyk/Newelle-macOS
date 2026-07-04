@@ -94,6 +94,7 @@ class MainWindow(Adw.ApplicationWindow):
         
         self.set_content(self.app_stack)
         self.build_main_window()
+        self._install_transient_cleanup_handlers()
 
     def build_main_window(self):
         # UI things
@@ -413,11 +414,42 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _cleanup_on_destroy(self, window):
         """Clean up resources when window is destroyed"""
+        self.close_transient_ui()
         # Stop wakeword detection
         self.stop_wakeword_detection()
         # Stop stdout monitoring
         if self.stdout_monitor_dialog:
             self.stdout_monitor_dialog.stop_monitoring_external()
+
+    def _install_transient_cleanup_handlers(self):
+        click_controller = Gtk.GestureClick()
+        click_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        click_controller.connect("pressed", self._on_window_capture_click)
+        self.add_controller(click_controller)
+
+        key_controller = Gtk.EventControllerKey.new()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_controller.connect("key-pressed", self._on_window_key_pressed)
+        self.add_controller(key_controller)
+
+    def _on_window_capture_click(self, gesture, n_press, x, y):
+        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        if self._is_transient_trigger(target):
+            return False
+        self.close_transient_ui()
+        return False
+
+    def _on_window_key_pressed(self, controller, keyval, keycode, state):
+        if keyval == Gdk.KEY_Escape and self.close_transient_ui():
+            return True
+        return False
+
+    def _is_transient_trigger(self, widget) -> bool:
+        while widget is not None:
+            if isinstance(widget, (Gtk.MenuButton, Gtk.DropDown)):
+                return True
+            widget = widget.get_parent()
+        return False
 
     def build_splashscreen(self):
         root = Gtk.Box(hexpand=True, vexpand=True, orientation=Gtk.Orientation.VERTICAL,halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
@@ -564,6 +596,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False 
 
     def on_tab_switched(self, tab_view, tab):
+        self.close_transient_ui()
         current_tab = self.canvas_tabs.get_selected_page()
         if current_tab is None:
             return
@@ -710,22 +743,26 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings.set_int("window-height", height)
         return True
 
-    def close_transient_ui(self):
+    def close_transient_ui(self) -> bool:
         """Close GTK transient surfaces before hiding or quitting the main window."""
+        closed = False
         for overview_name in ("chat_tab_overview", "canvas_overview"):
             overview = getattr(self, overview_name, None)
             if overview is not None:
+                closed = closed or overview.get_open()
                 overview.set_open(False)
 
         for popover_name in ("model_popup",):
             popover = getattr(self, popover_name, None)
             if popover is not None:
+                closed = closed or popover.get_visible()
                 popover.popdown()
 
         for widget in self._iter_widget_tree(self):
             if isinstance(widget, Gtk.MenuButton):
                 popover = widget.get_popover()
                 if popover is not None:
+                    closed = closed or popover.get_visible()
                     popover.popdown()
 
         for tab_view_name in ("chat_tabs", "canvas_tabs"):
@@ -736,10 +773,12 @@ class MainWindow(Adw.ApplicationWindow):
                 page = tab_view.get_nth_page(index)
                 child = page.get_child()
                 if hasattr(child, "close_transient_ui"):
-                    child.close_transient_ui()
+                    closed = child.close_transient_ui() or closed
 
-        self.queue_allocate()
-        self.queue_draw()
+        if closed:
+            self.queue_allocate()
+            self.queue_draw()
+        return closed
 
     def _iter_widget_tree(self, root):
         child = root.get_first_child()

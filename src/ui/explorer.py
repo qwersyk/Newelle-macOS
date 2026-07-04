@@ -31,6 +31,7 @@ class ExplorerPanel(Gtk.Box):
         self.flow_box = None
         self.get_current_path()
         self.context_menu_target = None  # Store the target file/folder for context menu
+        self._transient_popovers = set()
 
         # Create main content container
         self.main_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -59,6 +60,24 @@ class ExplorerPanel(Gtk.Box):
 
         self.build_explorer_panel_buttons()
         self.update_folder()
+
+    def _track_transient_popover(self, popover: Gtk.Popover, unparent_on_close: bool = False):
+        self._transient_popovers.add(popover)
+
+        def on_closed(popover):
+            self._transient_popovers.discard(popover)
+            if unparent_on_close and popover.get_parent() is not None:
+                popover.unparent()
+
+        popover.connect("closed", on_closed)
+        return popover
+
+    def close_transient_ui(self) -> bool:
+        closed = False
+        for popover in tuple(self._transient_popovers):
+            closed = closed or popover.get_visible()
+            popover.popdown()
+        return closed
 
     def go_to_path(self, path): 
         self.set_main_path(path)
@@ -435,7 +454,7 @@ class ExplorerPanel(Gtk.Box):
         action_group.add_action(action)
 
         menu.insert_action_group("explorer", action_group)
-        return menu
+        return self._track_transient_popover(menu, unparent_on_close=True)
 
     def on_open_new_tab(self, action, parameter, file_path):
         """Handler for 'Open in new tab' - emits signal for new tab creation"""
@@ -458,7 +477,7 @@ class ExplorerPanel(Gtk.Box):
 
     def on_rename(self, action, parameter, file_path, button):
         """Handler for 'Rename'"""
-        popover = Gtk.Popover()
+        popover = self._track_transient_popover(Gtk.Popover(), unparent_on_close=True)
         popover.set_parent(button)
 
         # Create the content box
@@ -650,7 +669,7 @@ class ExplorerPanel(Gtk.Box):
         action_group.add_action(action)
 
         menu.insert_action_group("explorer", action_group)
-        return menu
+        return self._track_transient_popover(menu, unparent_on_close=True)
 
     def on_empty_space_right_click(self, gesture, n_press, x, y):
         """Handler for right-click on empty spaces"""
@@ -699,7 +718,7 @@ class ExplorerPanel(Gtk.Box):
         temp_button = Gtk.Button()
         temp_button.set_parent(self.folder_blocks_panel)
         
-        popover = Gtk.Popover()
+        popover = self._track_transient_popover(Gtk.Popover())
         popover.set_parent(temp_button)
 
         # Create the content box
