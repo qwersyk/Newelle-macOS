@@ -2,7 +2,7 @@ name: macOS Build
 
 on:
   push:
-    branches: [ macOS ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -45,10 +45,9 @@ jobs:
       - name: Build DMG
         run: NEWELLE_SKIP_APP_BUILD=1 /usr/bin/env bash macos/build_newelle_dmg.sh
 
-      - name: Upload artifacts
+      - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: Newelle-macos-${{ matrix.arch }}
-          path: |
-            dist/Newelle.app
-            dist/Newelle-*-macos-${{ matrix.arch }}.dmg
+          name: Newelle-macos-${{ matrix.arch }}-dmg
+          path: dist/Newelle-*-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
