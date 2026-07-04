@@ -421,11 +421,9 @@ class MyApp(Adw.Application):
     def close_window(self, *a):
         if self.win is None:
             return False
+        self.win.close_transient_ui()
         if all(element.poll() is not None for element in self.win.streams):
-            settings = Gio.Settings.new('io.github.qwersyk.Newelle')
-            if not self.win.mini_mode:
-                settings.set_int("window-width", self.win.get_width())
-                settings.set_int("window-height", self.win.get_height())
+            self.win.save_main_window_geometry(mapped_only=True)
             self.win.controller.close_application()
             return False
         else:
@@ -446,15 +444,17 @@ class MyApp(Adw.Application):
     
     def close_message(self,a,status):
         if status=="close":
+            self.win.close_transient_ui()
+            self.win.save_main_window_geometry(mapped_only=True)
             for i in self.win.streams:
                 i.terminate()
             self.win.controller.close_application()
             self.quit()
 
     def on_main_window_close_request(self, window, *args):
-        if not window.mini_mode:
-            self.settings.set_int("window-width", window.get_width())
-            self.settings.set_int("window-height", window.get_height())
+        window.close_transient_ui()
+        window.save_main_window_geometry(mapped_only=True)
+        GLib.idle_add(lambda: window.close_transient_ui() or False)
         return False
 
     def on_activate(self, app):
@@ -542,6 +542,8 @@ class MyApp(Adw.Application):
     
     def do_shutdown(self):
         if self.win is not None:
+            self.win.close_transient_ui()
+            self.win.save_main_window_geometry(mapped_only=True)
             self.win.save_chat()
             settings = Gio.Settings.new('io.github.qwersyk.Newelle')
             settings.set_int("chat", self.win.chat_id)

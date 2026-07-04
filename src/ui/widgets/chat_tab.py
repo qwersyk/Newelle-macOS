@@ -411,6 +411,13 @@ class ChatTab(Gtk.Box):
     def _update_toggles(self, *_):
         """Update settings when quick toggles popover is closed."""
         self.controller.update_settings()
+
+    def close_transient_ui(self):
+        """Close popovers owned by this chat tab before the parent window hides."""
+        if hasattr(self, "_cmd_popover") and self._cmd_popover is not None:
+            self._cmd_popover.popdown()
+        if hasattr(self, "quick_toggles_popover") and self.quick_toggles_popover is not None:
+            self.quick_toggles_popover.popdown()
         
     def _update_attach_visibility(self):
         """Update attach button visibility based on model capabilities."""

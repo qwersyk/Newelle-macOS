@@ -60,6 +60,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.chat_panel_width = 380
         self.history_sidebar_width = 260
         self.canvas_sidebar_width = 360
+        self.minimum_main_window_width = 720
+        self.minimum_main_window_height = 480
+        self.default_main_window_width = 1400
+        self.default_main_window_height = 800
         self.mini_mode = False
         self._mini_saved_state = None
         self._startup_layout_stabilized = False
@@ -81,7 +85,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings = self.controller.settings
         # Set window default size
 
-        self.set_default_size(self.settings.get_int("window-width"), self.settings.get_int("window-height"))
+        width = self.settings.get_int("window-width")
+        height = self.settings.get_int("window-height")
+        if width < self.minimum_main_window_width or height < self.minimum_main_window_height:
+            width = self.default_main_window_width
+            height = self.default_main_window_height
+        self.set_default_size(width, height)
         
         self.set_content(self.app_stack)
         self.build_main_window()
@@ -680,11 +689,64 @@ class MainWindow(Adw.ApplicationWindow):
         return False  # Allow close
 
     def close_active_chat_tab_or_window(self):
+        self.close_transient_ui()
         selected_page = self.chat_tabs.get_selected_page()
         if selected_page is not None and self.chat_tabs.get_n_pages() > 1:
             self.chat_tabs.close_page(selected_page)
             return
         self.close()
+
+    def save_main_window_geometry(self, mapped_only: bool = True) -> bool:
+        """Persist only real main-window geometry, never hidden or mini surfaces."""
+        if self.mini_mode:
+            return False
+        if mapped_only and not self.get_mapped():
+            return False
+        width = self.get_width()
+        height = self.get_height()
+        if width < self.minimum_main_window_width or height < self.minimum_main_window_height:
+            return False
+        self.settings.set_int("window-width", width)
+        self.settings.set_int("window-height", height)
+        return True
+
+    def close_transient_ui(self):
+        """Close GTK transient surfaces before hiding or quitting the main window."""
+        for overview_name in ("chat_tab_overview", "canvas_overview"):
+            overview = getattr(self, overview_name, None)
+            if overview is not None:
+                overview.set_open(False)
+
+        for popover_name in ("model_popup",):
+            popover = getattr(self, popover_name, None)
+            if popover is not None:
+                popover.popdown()
+
+        for widget in self._iter_widget_tree(self):
+            if isinstance(widget, Gtk.MenuButton):
+                popover = widget.get_popover()
+                if popover is not None:
+                    popover.popdown()
+
+        for tab_view_name in ("chat_tabs", "canvas_tabs"):
+            tab_view = getattr(self, tab_view_name, None)
+            if tab_view is None:
+                continue
+            for index in range(tab_view.get_n_pages()):
+                page = tab_view.get_nth_page(index)
+                child = page.get_child()
+                if hasattr(child, "close_transient_ui"):
+                    child.close_transient_ui()
+
+        self.queue_allocate()
+        self.queue_draw()
+
+    def _iter_widget_tree(self, root):
+        child = root.get_first_child()
+        while child is not None:
+            yield child
+            yield from self._iter_widget_tree(child)
+            child = child.get_next_sibling()
     
     def _on_create_chat_tab(self, tab_overview) -> Adw.TabPage:
         """Handle new tab creation from tab overview."""
