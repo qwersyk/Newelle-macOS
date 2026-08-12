@@ -477,12 +477,33 @@ class MainWindow(Adw.ApplicationWindow):
         icon.set_icon_size(Gtk.IconSize.INHERIT)
         box.append(icon)
         self.new_tab_button.set_child(box)
+        self.refresh_add_tab_menu()
        
         # Detach tab button 
         self.detach_tab_button = Gtk.Button(css_classes=["flat"], icon_name="detach-symbolic")
         self.detach_tab_button.connect("clicked", self.detach_tab) 
         
-        # Create custom menu entries: Title, Icon, Callable
+        self.canvas_header.pack_end(self.canvas_button)
+        self.canvas_header.pack_end(self.new_tab_button)
+        self.canvas_header.pack_end(self.detach_tab_button)
+
+        self.canvas_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.canvas_box.append(self.canvas_header)
+        self.canvas_box.append(self.canvas_tab_bar)
+        self.canvas_box.append(self.canvas_overview)
+        self.add_explorer_tab(None, self.main_path)
+        bin = Adw.BreakpointBin(child=self.main, width_request=300, height_request=300)
+        breakpoint = Adw.Breakpoint(condition=Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, 900, Adw.LengthUnit.PX))
+        breakpoint.add_setter(self.main, "collapsed", True)
+        bin.add_breakpoint(breakpoint)
+
+        self.main_program_block.set_content(bin)
+        self.main_program_block.set_sidebar(self.canvas_box)
+        self.main_program_block.set_name("hide")
+
+    def refresh_add_tab_menu(self):
+        """Rebuild the add-tab popover after mini-app extensions change."""
+        self.extensionloader = self.controller.extensionloader
         menu_entries = [
             (_("Explorer Tab"), "folder-symbolic", self.add_explorer_tab),
             (_("Terminal Tab"), "gnome-terminal-symbolic", self.add_terminal_tab),
@@ -490,6 +511,7 @@ class MainWindow(Adw.ApplicationWindow):
             (_("Start Call"), "call-start-symbolic", self.start_call_tab),
             (_("Image Generator"), "insert-image-symbolic", self.add_image_generator_tab),
         ]
+        menu_entries += self.controller.integrationsloader.get_add_tab_buttons()
         menu_entries += self.extensionloader.get_add_tab_buttons()
         
         # Create custom popover with ListBox
