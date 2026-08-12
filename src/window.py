@@ -453,7 +453,6 @@ class MainWindow(Adw.ApplicationWindow):
         return root
 
     def build_canvas(self):
-
         self.canvas_header = Adw.HeaderBar(css_classes=["flat"], show_start_title_buttons=False, show_end_title_buttons=False)
         self.canvas_header.set_title_widget(Gtk.Label())
         self.canvas_headerbox = Gtk.Box(halign=Gtk.Align.CENTER)
@@ -487,18 +486,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas_header.pack_end(self.new_tab_button)
         self.canvas_header.pack_end(self.detach_tab_button)
 
+        self.canvas_toolbar_view = Adw.ToolbarView()
+        self.canvas_toolbar_view.add_top_bar(self.canvas_header)
         self.canvas_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.canvas_box.append(self.canvas_header)
         self.canvas_box.append(self.canvas_tab_bar)
         self.canvas_box.append(self.canvas_overview)
+        self.canvas_toolbar_view.set_content(self.canvas_box)
         self.add_explorer_tab(None, self.main_path)
-        bin = Adw.BreakpointBin(child=self.main, width_request=300, height_request=300)
-        breakpoint = Adw.Breakpoint(condition=Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, 900, Adw.LengthUnit.PX))
+        bin = Adw.BreakpointBin(child=self.main, width_request=self.history_sidebar_width, height_request=300)
+        history_collapse_width = 680
+        breakpoint = Adw.Breakpoint(condition=Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, history_collapse_width, Adw.LengthUnit.PX))
         breakpoint.add_setter(self.main, "collapsed", True)
         bin.add_breakpoint(breakpoint)
 
         self.main_program_block.set_content(bin)
-        self.main_program_block.set_sidebar(self.canvas_box)
+        self.main_program_block.set_sidebar(self.canvas_toolbar_view)
         self.main_program_block.set_name("hide")
 
     def refresh_add_tab_menu(self):
@@ -552,26 +554,6 @@ class MainWindow(Adw.ApplicationWindow):
         listbox.connect("row-activated", on_row_activated)
         popover.set_child(listbox)
         self.new_tab_button.set_popover(popover)
-        self.canvas_header.pack_end(self.canvas_button)
-        self.canvas_header.pack_end(self.new_tab_button)
-        self.canvas_header.pack_end(self.detach_tab_button)
-
-        self.canvas_toolbar_view = Adw.ToolbarView()
-        self.canvas_toolbar_view.add_top_bar(self.canvas_header)
-        self.canvas_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.canvas_box.append(self.canvas_tab_bar)
-        self.canvas_box.append(self.canvas_overview)
-        self.canvas_toolbar_view.set_content(self.canvas_box)
-        self.add_explorer_tab(None, self.main_path)
-        bin = Adw.BreakpointBin(child=self.main, width_request=self.history_sidebar_width, height_request=300)
-        history_collapse_width = 680
-        breakpoint = Adw.Breakpoint(condition=Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, history_collapse_width, Adw.LengthUnit.PX))
-        breakpoint.add_setter(self.main, "collapsed", True)
-        bin.add_breakpoint(breakpoint)
-
-        self.main_program_block.set_content(bin)
-        self.main_program_block.set_sidebar(self.canvas_toolbar_view)
-        self.main_program_block.set_name("hide")
    
     def detach_tab(self, button):
         """Method to move a tab to another window
