@@ -23,11 +23,13 @@ from .utility.system import activate_macos_application, primary_accel
 class MyApp(Adw.Application):
     def __init__(self, version, **kwargs):
         self.version = version
-        super().__init__(**kwargs)
+        super().__init__(flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE, **kwargs)
         self.settings = Gio.Settings.new("io.github.qwersyk.Newelle")
         self.settingswindow = None
         self.win = None
-        self.mini_windows = []
+        self.mini_win = None
+        self.add_main_option("run-action", 0, GLib.OptionFlags.NONE, GLib.OptionArg.STRING, "Run an action", "ACTION")
+        self.add_main_option("mini", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE, "Start in mini window mode", None)
         css = '''
         .code{
         background-color: rgb(38,38,38);
@@ -353,19 +355,6 @@ class MyApp(Adw.Application):
         GLib.timeout_add(100, lambda: activate_macos_application() or False)
         return window
 
-    def _on_mini_window_destroy(self, window):
-        if window in self.mini_windows:
-            self.mini_windows.remove(window)
-
-    def _open_new_mini_window(self, present: bool = True) -> MiniWindow:
-        main_window = self._ensure_main_window()
-        mini_window = MiniWindow(application=self, main_window=main_window)
-        mini_window.connect("destroy", self._on_mini_window_destroy)
-        self.mini_windows.append(mini_window)
-        if present:
-            mini_window.present()
-        return mini_window
-
     def on_shortcuts_action(self, *a):
         shortcuts = Shortcuts(self)
         shortcuts.present()
@@ -448,6 +437,8 @@ class MyApp(Adw.Application):
         if self.win is None:
             return False
         self.win.close_transient_ui()
+        if getattr(self, "mini_win", None) is not None and self.mini_win.get_visible():
+            self.mini_win.close()
         if all(element.poll() is not None for element in self.win.streams):
             self.win.save_main_window_geometry(mapped_only=True)
             self.win.controller.close_application()
@@ -483,16 +474,54 @@ class MyApp(Adw.Application):
         GLib.idle_add(lambda: window.close_transient_ui() or False)
         return False
 
+    def do_command_line(self, command_line):
+        options = command_line.get_options_dict()
+        if options.contains("mini"):
+            self.start_in_mini = True
+        if options.contains("run-action"):
+            action_name = options.lookup_value("run-action").get_string()
+            if self.lookup_action(action_name):
+                self.activate_action(action_name, None)
+            else:
+                command_line.printerr(f"Action '{action_name}' not found.\n")
+                return 1
+
+        self.activate()
+        return 0
+
     def on_activate(self, app):
         self._ensure_main_window()
 
-        if self.settings.get_string("startup-mode") == "mini" and not self._has_visible_windows():
+        if getattr(self, "start_in_mini", False) or self.settings.get_string("startup-mode") == "mini":
             self.settings.set_string("startup-mode", "normal")
-            self._open_new_mini_window()
-            return
-
-        if not self._has_visible_windows():
+            # --mini is per-invocation: a later plain `newelle` must present the main window
+            self.start_in_mini = False
+            if getattr(self.win, "ui_built", False):
+                self.show_mini_window()
+                self.win.hide()
+            else:
+                self.win.connect("ui-built", self.show_mini_window)
+        else:
             self._present_main_window()
+
+    def show_mini_window(self, *args):
+        """Open the mini window hosting the chat panel of the main window"""
+        if getattr(self, "mini_win", None) is not None and self.mini_win.get_visible():
+            self.mini_win.close()
+        self.mini_win = MiniWindow(application=self, main_window=self.win)
+        self.mini_win.present()
+        GLib.idle_add(activate_macos_application)
+
+    def toggle_mini_window(self, *a):
+        """Switch between the mini window and the full window"""
+        if getattr(self, "mini_win", None) is not None and self.mini_win.is_active():
+            # From the mini window: give the panel back and show the full window
+            self.mini_win.close()
+            self.win.present()
+        else:
+            # From the full window: host the chat panel in the mini window instead
+            self.show_mini_window()
+            self.win.hide()
 
     def focus_message(self, *a):
         self._present_main_window()
@@ -664,6 +693,7 @@ def main(version):
     app.create_action('zoom', app.zoom, [primary_accel("plus"), primary_accel("equal")])
     app.create_action('zoom_out', app.zoom_out, [primary_accel("minus")])
     app.create_action('debug', app.debug, [primary_accel("b")])
+    app.create_action('toggle_mini_window', app.toggle_mini_window, [primary_accel("d")])
     app.set_action_shortcuts("preferences", [primary_accel("comma")])
     app.set_action_shortcuts("shortcuts", ["<Shift>" + primary_accel("slash")])
     app.run(sys.argv)

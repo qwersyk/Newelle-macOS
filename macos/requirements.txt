@@ -24,3 +24,4 @@ ddgs
 edge-tts
 elevenlabs==2.9.1
 tavily-python
+python-multipart

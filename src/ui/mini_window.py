@@ -1,39 +1,60 @@
 import gettext
 
-from gi.repository import Gtk, GLib, Gdk
+from gi.repository import Gtk, Gdk
 
-from .widgets.chat_tab import ChatTab
 from ..utility.system import has_primary_modifier
 
 _ = gettext.gettext
 
 
 class MiniWindow(Gtk.Window):
+    """Compact window that temporarily hosts the main chat panel."""
+
     def __init__(self, application, main_window, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(application=application, **kwargs)
         self.main_window = main_window
-        self.set_application(application)
         self.set_title(_("Newelle Mini Window"))
         self.set_default_size(540, 520)
         self.set_decorated(False)
         self.set_resizable(False)
         self.add_css_class("mini-window")
 
-        active_tab = main_window.get_active_chat_tab()
-        chat_id = active_tab.chat_id if active_tab is not None else main_window.chat_id
+        # WindowHandle so the undecorated window can be dragged around
+        self.handle = Gtk.WindowHandle()
+        self.set_child(self.handle)
 
-        self.chat_view = ChatTab(main_window, chat_id)
-        self.chat_view.set_hexpand(True)
-        self.chat_view.set_vexpand(True)
-        self.set_child(self.chat_view)
+        self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.handle.set_child(self.main_box)
+
+        # Shown in the main window while the chat panel is hosted here
+        self.placeholder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.placeholder.set_valign(Gtk.Align.CENTER)
+        self.placeholder.set_halign(Gtk.Align.CENTER)
+        self.placeholder.set_vexpand(True)
+        placeholder_label = Gtk.Label(label=_("Chat is opened in mini window"))
+        placeholder_label.add_css_class("dim-label")
+        self.placeholder.append(placeholder_label)
+
+        self.chat_panel = None
+        self.original_parent = None
+        self._attach_chat_panel()
 
         key_controller = Gtk.EventControllerKey()
         key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self._on_key_pressed)
         self.add_controller(key_controller)
+        self.connect('close-request', self._on_close_request)
 
-        GLib.idle_add(self.chat_view.show_chat)
-        GLib.idle_add(self.chat_view.focus_input)
+    def _attach_chat_panel(self):
+        self.chat_panel = self.main_window.secondary_message_chat_block
+        parent = self.chat_panel.get_parent()
+        if parent is not None:
+            self.original_parent = parent
+            self.chat_panel.unparent()
+            self.original_parent.append(self.placeholder)
+        self.main_box.append(self.chat_panel)
+        # The mini window always uses the compact input bar, whatever the setting
+        self.main_window._apply_compact_input_bar(True)
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
         if keyval == Gdk.KEY_Escape:
@@ -42,4 +63,21 @@ class MiniWindow(Gtk.Window):
         if has_primary_modifier(state) and Gdk.keyval_to_lower(keyval) == Gdk.KEY_w:
             self.close()
             return True
+        return False
+    def _on_close_request(self, *args):
+        if self.chat_panel is not None:
+            if self.chat_panel.get_parent() is not None:
+                self.chat_panel.unparent()
+
+            if self.placeholder.get_parent() is not None:
+                self.placeholder.unparent()
+
+            if self.original_parent is not None:
+                self.original_parent.append(self.chat_panel)
+
+            self.chat_panel = None
+            self.original_parent = None
+            # Give each tab back the layout chosen in the settings
+            self.main_window._refresh_compact_input_bar()
+
         return False
