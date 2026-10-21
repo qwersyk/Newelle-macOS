@@ -83,6 +83,9 @@ if [[ ! -d "$VENV_DIR" ]]; then
   "$BREW_PYTHON_BIN" -m venv --system-site-packages "$VENV_DIR"
 fi
 "$VENV_DIR/bin/pip" install --disable-pip-version-check -r "$ROOT/macos/requirements.txt"
+# Homebrew may build pygobject3 for a newer Python than the bundled runtime.
+# Verify the exact interpreter before copying a bundle that cannot start.
+"$VENV_DIR/bin/python" -c 'import gi, cairo; gi.require_version("Gtk", "4.0"); from gi.repository import Gtk'
 
 if [[ -e "$APP_DIR" ]] && ! rm -rf "$APP_DIR" 2>/dev/null; then
   echo "Cannot replace $APP_DIR"
@@ -95,6 +98,8 @@ rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/src/" "$APP_R
 rsync -a --delete "$ROOT/data/" "$APP_ROOT/data/"
 cp "$ROOT/meson.build" "$APP_ROOT/meson.build"
 cp "$ROOT/macos/run_newelle.py" "$APP_ROOT/macos/run_newelle.py"
+cp "$ROOT/macos/smoke_test.py" "$APP_ROOT/macos/smoke_test.py"
+cp "$ROOT/macos/windowing.py" "$APP_ROOT/macos/windowing.py"
 
 rsync -aL --delete --exclude '__pycache__' "$PYTHON_FRAMEWORK_SOURCE/" "$PYTHON_DEST_VERSION_DIR/"
 find "$PYTHON_DEST_VERSION_DIR" \( -name '_CodeSignature' -o -name 'CodeResources' \) -exec rm -rf {} +

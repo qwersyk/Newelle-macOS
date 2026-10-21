@@ -3,7 +3,15 @@ name: macOS Build
 on:
   push:
     branches: [ main ]
+  pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -41,6 +49,13 @@ jobs:
 
       - name: Build app
         run: /usr/bin/env bash macos/build_newelle_app.sh
+
+      - name: Run macOS compatibility tests
+        run: .venv-macos/bin/python -m unittest discover -s tests -v
+
+      - name: Smoke test packaged app
+        run: dist/Newelle.app/Contents/MacOS/Newelle --smoke-test
+        timeout-minutes: 3
 
       - name: Build DMG
         run: NEWELLE_SKIP_APP_BUILD=1 /usr/bin/env bash macos/build_newelle_dmg.sh

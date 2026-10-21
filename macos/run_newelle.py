@@ -163,7 +163,7 @@ def load_package():
     return module
 
 
-def main() -> int:
+def launch() -> int:
     version = detect_version()
     app_name = os.getenv("NEWELLE_APP_NAME", "Newelle")
     locale_dir = LOCALE_DIR
@@ -200,8 +200,28 @@ def main() -> int:
 
     load_package()
     from newelle import main as newelle_main
+    from windowing import install_window_drag_workaround
+    install_window_drag_workaround()
 
+    if "--smoke-test" in sys.argv:
+        from smoke_test import run
+        return run(version)
     return newelle_main.main(version)
+
+
+def main() -> int:
+    if "--smoke-test" not in sys.argv:
+        return launch()
+    import tempfile
+    # Set these before GLib is imported and caches the user's directories.
+    with tempfile.TemporaryDirectory(prefix="newelle-smoke-") as state:
+        for name, directory in (("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")):
+            os.environ[name] = os.path.join(state, directory)
+            os.makedirs(os.environ[name])
+        os.environ["GSETTINGS_BACKEND"] = "memory"
+        # Avoid bootstrapping an optional pip target during the UI check.
+        os.makedirs(os.path.join(state, "config", "Newelle", "pip"), exist_ok=True)
+        return launch()
 
 
 if __name__ == "__main__":
