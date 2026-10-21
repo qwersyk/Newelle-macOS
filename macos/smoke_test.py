@@ -95,12 +95,18 @@ def run(version):
             check(True, "voice mode surface")
             app._smoke_voice = voice
             second = app.create_main_window(source=app.win, suppress_presentation=True)
+            second.connect("ui-built", lambda *_: GLib.timeout_add(250, stop))
             second.present()
-            GLib.timeout_add(1500, stop)
         except Exception:
             traceback.print_exc(file=sys.__stderr__)
             errors.append(sys.exc_info())
             app.quit()
+        return GLib.SOURCE_REMOVE
+
+    def timeout():
+        errors.append((TimeoutError, TimeoutError("UI smoke test exceeded 120 seconds"), None))
+        print("FAIL UI smoke test timed out", file=sys.__stderr__, flush=True)
+        app.quit()
         return GLib.SOURCE_REMOVE
 
     def offline(*_args, **_kwargs):
@@ -112,6 +118,7 @@ def run(version):
              patch.object(HandlersManager, "install_missing_handlers"), \
              patch.object(StdoutMonitor, "start_monitoring"):
             GLib.timeout_add(100, exercise)
+            GLib.timeout_add_seconds(120, timeout)
             app.run(["Newelle"])
     finally:
         sys.excepthook = original_hook

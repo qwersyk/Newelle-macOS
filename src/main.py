@@ -870,13 +870,15 @@ class MyApp(Adw.Application):
 
         shutdown_command_executions()
         shutdown_command_sessions()
-        if self.win is None:
+        ready_windows = [window for window in self.main_windows if getattr(window, "ui_built", False)]
+        if not ready_windows:
             Gtk.Application.do_shutdown(self)
             return
-        self.win.save_chat()
+        active = self.win if self.win in ready_windows else ready_windows[-1]
+        active.save_chat()
         settings = Gio.Settings.new('io.github.qwersyk.Newelle')
-        settings.set_int("chat", self.win.chat_id)
-        for window in self.main_windows:
+        settings.set_int("chat", active.chat_id)
+        for window in ready_windows:
             window.save_workspace_tabs()
             window.stream_number_variable += 1
             window.controller.close_application()
