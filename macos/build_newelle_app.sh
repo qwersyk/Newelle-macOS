@@ -96,6 +96,7 @@ rsync -a --delete "$ROOT/data/" "$APP_ROOT/data/"
 cp "$ROOT/meson.build" "$APP_ROOT/meson.build"
 cp "$ROOT/macos/run_newelle.py" "$APP_ROOT/macos/run_newelle.py"
 cp "$ROOT/macos/smoke_test.py" "$APP_ROOT/macos/smoke_test.py"
+cp "$ROOT/macos/windowing.py" "$APP_ROOT/macos/windowing.py"
 
 rsync -aL --delete --exclude '__pycache__' "$PYTHON_FRAMEWORK_SOURCE/" "$PYTHON_DEST_VERSION_DIR/"
 find "$PYTHON_DEST_VERSION_DIR" \( -name '_CodeSignature' -o -name 'CodeResources' \) -exec rm -rf {} +

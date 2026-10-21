@@ -109,3 +109,14 @@ For future updates, merge `qwersyk/Newelle`'s `master` branch into a working
 branch in this repository and run the macOS build and checks before merging.
 Keep the `macos/` packaging and platform compatibility code when resolving
 conflicts. Changes to this fork do not require changes to the upstream repository.
+
+
+### macOS 27.2 window dragging
+
+macOS 27.2 has a reported intermittent failure in the native drag handoff used
+by GTK. On that OS version this fork tracks header drags inside the app for
+both main and settings windows. This preserves normal window movement, but
+native edge snapping and dragging through Mission Control are not provided
+by the compatibility path. Other macOS versions keep the native drag path.
+Set `NEWELLE_MANUAL_WINDOW_DRAG=0` to disable the workaround, or `1` to enable
+it explicitly when testing another affected OS build.

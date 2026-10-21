@@ -130,6 +130,24 @@ class ScreenRecordingTests(unittest.TestCase):
         recorder._fail.assert_called_once()
 
 
+class WindowDragTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("macos_windowing_tests", ROOT / "macos/windowing.py")
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def test_workaround_is_limited_to_affected_os(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(self.module.needs_manual_window_drag("26.6"))
+            self.assertFalse(self.module.needs_manual_window_drag("27.1"))
+            self.assertTrue(self.module.needs_manual_window_drag("27.2"))
+            self.assertFalse(self.module.needs_manual_window_drag("27.3"))
+
+    def test_drag_keeps_mouse_offset_on_negative_display_coordinates(self):
+        self.assertEqual(self.module.drag_origin((-1000, 200), (-900, 600), (-800, 650)), (-900, 250))
+
+
 class RuntimeTests(unittest.TestCase):
     def test_pip_uses_bundled_interpreter(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"NEWELLE_PYTHON_BIN": "/bundled/python"}), \

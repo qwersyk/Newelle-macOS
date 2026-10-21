@@ -200,6 +200,8 @@ def launch() -> int:
 
     load_package()
     from newelle import main as newelle_main
+    from windowing import install_window_drag_workaround
+    install_window_drag_workaround()
 
     if "--smoke-test" in sys.argv:
         from smoke_test import run

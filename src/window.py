@@ -75,7 +75,10 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
         self._mini_saved_state = None
         self._startup_layout_stabilized = False
         # Main program block - On the right Canvas tabs, Chat as content
-        self.app_stack = Gtk.Stack(transition_duration=500, transition_type=Gtk.StackTransitionType.SLIDE_UP)
+        # Native macOS title buttons use their header's position in the root.
+        # Sliding that header in from below makes AppKit retain an oversized
+        # title bar after the GTK animation, moving controls and drag regions.
+        self.app_stack = Gtk.Stack(transition_duration=0, transition_type=Gtk.StackTransitionType.NONE)
         self.main_program_block = Adw.OverlaySplitView(
             enable_hide_gesture=False,
             sidebar_position=Gtk.PackType.END,
@@ -121,7 +124,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
         self._wakeword_restart_pending = False
         self._wakeword_stop_source_id = None
         # Breakpoint - Collapse the sidebar when the window is too narrow
-        canvas_collapse_width = 760
+        canvas_collapse_width = 1000
         breakpoint = Adw.Breakpoint(condition=Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, canvas_collapse_width, Adw.LengthUnit.PX))
         breakpoint.add_setter(self.main_program_block, "collapsed", True)
         self.add_breakpoint(breakpoint)
@@ -472,11 +475,12 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
         self.add_controller(key_controller)
 
     def _on_window_capture_click(self, gesture, n_press, x, y):
+        # This observer must not compete with GtkWindowHandle's drag gesture.
+        gesture.set_state(Gtk.EventSequenceState.DENIED)
         target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
         if self._is_transient_trigger(target):
-            return False
+            return
         self.close_transient_ui()
-        return False
 
     def _on_window_key_pressed(self, controller, keyval, keycode, state):
         if keyval == Gdk.KEY_Escape and self.close_transient_ui():
@@ -485,7 +489,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
 
     def _is_transient_trigger(self, widget) -> bool:
         while widget is not None:
-            if isinstance(widget, (Gtk.MenuButton, Gtk.DropDown)):
+            if isinstance(widget, (Gtk.MenuButton, Gtk.DropDown, Adw.HeaderBar, Gtk.HeaderBar, Gtk.WindowHandle)):
                 return True
             widget = widget.get_parent()
         return False
@@ -542,7 +546,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
         self.canvas_toolbar_view.set_content(self.canvas_box)
         self.add_explorer_tab(None, self.main_path)
         bin = Adw.BreakpointBin(child=self.main, width_request=self.history_sidebar_width, height_request=300)
-        history_collapse_width = 680
+        history_collapse_width = 1000
         breakpoint = Adw.Breakpoint(condition=Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, history_collapse_width, Adw.LengthUnit.PX))
         breakpoint.add_setter(self.main, "collapsed", True)
         bin.add_breakpoint(breakpoint)
