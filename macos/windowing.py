@@ -81,7 +81,13 @@ def install_window_drag_workaround():
         if screen is not None:
             # Keep the top of the window reachable below the menu bar.
             visible = screen.visibleFrame()
-            y = min(y, visible.origin.y + visible.size.height - size.height)
+            # Preserve any existing title-bar overhang when the grab starts;
+            # clamping an already positioned window causes a small first-frame jump.
+            highest_origin = max(origin[1], visible.origin.y + visible.size.height - size.height)
+            y = min(y, highest_origin)
+        current = window.frame().origin
+        if abs(current.x - x) < 0.01 and abs(current.y - y) < 0.01:
+            return event
         window.setFrameOrigin_(NSMakePoint(x, y))
         if os.getenv("NEWELLE_DEBUG_WINDOWING") == "1":
             print("Manual native window drag moved", flush=True)
