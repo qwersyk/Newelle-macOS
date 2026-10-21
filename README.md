@@ -72,3 +72,51 @@ Build from source on macOS:
 ```bash
 /usr/bin/env bash macos/build_newelle_dmg.sh
 ```
+
+
+## macOS build and checks
+
+This fork includes upstream Newelle 1.6.0 and subsequent fixes through
+[`d6ed29b`](https://github.com/qwersyk/Newelle/commit/d6ed29b), while keeping the
+native macOS launcher, Command shortcuts, browser, terminal, and DMG packaging.
+
+On an Apple Silicon Mac, install the build dependencies with Homebrew:
+
+```bash
+brew install python@3.13 gtk4 libadwaita gtksourceview5 pygobject3 \
+  adwaita-icon-theme vte3 portaudio librsvg ffmpeg gettext
+/usr/bin/env bash macos/build_newelle_dmg.sh
+```
+
+The installer is written to `dist/Newelle-1.6.0-macos-arm64.dmg`. The app includes
+its Python and native dependencies, so Homebrew is only required for building.
+Builds are ad-hoc signed and are not notarized.
+
+Run the same compatibility checks used by GitHub Actions after building:
+
+```bash
+.venv-macos/bin/python -m unittest discover -s tests -v
+dist/Newelle.app/Contents/MacOS/Newelle --smoke-test
+```
+
+The smoke test uses temporary settings and chats, blocks provider network
+requests and dependency installation, and checks the main window, tabs,
+settings, downloads, mini window, Voice Mode surface, and multiple windows.
+It does not open the microphone or capture the screen. Recording and screenshot
+features require access in macOS System Settings > Privacy & Security.
+
+For future updates, merge `qwersyk/Newelle`'s `master` branch into a working
+branch in this repository and run the macOS build and checks before merging.
+Keep the `macos/` packaging and platform compatibility code when resolving
+conflicts. Changes to this fork do not require changes to the upstream repository.
+
+
+### macOS 27.2 window dragging
+
+macOS 27.2 has a reported intermittent failure in the native drag handoff used
+by GTK. On that OS version this fork tracks header drags inside the app for
+both main and settings windows. This preserves normal window movement, but
+native edge snapping and dragging through Mission Control are not provided
+by the compatibility path. Other macOS versions keep the native drag path.
+Set `NEWELLE_MANUAL_WINDOW_DRAG=0` to disable the workaround, or `1` to enable
+it explicitly when testing another affected OS build.

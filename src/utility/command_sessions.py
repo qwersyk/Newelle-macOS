@@ -208,7 +208,7 @@ class CommandSession:
         # exec wrapper makes the already-connected slave its controlling TTY.
         # Keeping this outside preexec_fn is important in the app's threaded
         # process: Python explicitly warns that preexec_fn can deadlock there.
-        cmd = [sys.executable, "-c", _PTY_CHILD_LAUNCHER, *cmd]
+        cmd = [os.getenv("NEWELLE_PYTHON_BIN") or sys.executable, "-c", _PTY_CHILD_LAUNCHER, *cmd]
 
         try:
             self.process = subprocess.Popen(
@@ -587,6 +587,14 @@ class CommandSessionManager:
         with self._lock:
             return sorted(
                 (session for session in self._sessions.values() if session.owner == owner),
+                key=lambda session: session.created_at,
+            )
+
+    def list_all(self) -> list[CommandSession]:
+        """Return currently running sessions across all chat owners."""
+        with self._lock:
+            return sorted(
+                (session for session in self._sessions.values() if session.is_running),
                 key=lambda session: session.created_at,
             )
 
