@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 def run(version):
     import requests
-    from gi.repository import GLib
+    from gi.repository import Gio, GLib
     from newelle.main import create_application
     from newelle.controller import HandlersManager
     from newelle.utility.stdout_capture import StdoutMonitor
@@ -22,6 +22,8 @@ def run(version):
 
     sys.excepthook = report_error
     app = create_application(version)
+    app.set_application_id("io.github.qwersyk.Newelle.SmokeTest")
+    app.set_flags(app.get_flags() | Gio.ApplicationFlags.NON_UNIQUE)
     app.settings.set_boolean("welcome-screen-shown", True)
     deadline = time.monotonic() + 45
     status = 1
@@ -31,10 +33,24 @@ def run(version):
             raise AssertionError(name)
         print("PASS " + name, file=sys.__stdout__, flush=True)
 
+    def check_window_controls(window, name):
+        import objc
+        from AppKit import NSWindowCloseButton
+        from newelle.ui.widgets.browser_native_macos import _capsule_to_pointer, _get_native_window
+        pointer = _capsule_to_pointer(window.get_surface().__gpointer__, None)
+        native = objc.objc_object(c_void_p=_get_native_window(pointer))
+        button = native.standardWindowButton_(NSWindowCloseButton)
+        bounds = button.convertRect_toView_(button.bounds(), None)
+        top = native.frame().size.height - bounds.origin.y - bounds.size.height
+        check(0 <= top <= 64, name + " controls stay in the header")
+
     def stop():
         nonlocal status
         try:
             check(len(app.main_windows) == 2, "multiple main windows")
+            check_window_controls(app.main_windows[0], "main window")
+            check_window_controls(app.settingswindow, "settings window")
+            app.settingswindow.close()
             check(all(getattr(w, "ui_built", False) for w in app.main_windows), "workspace window UI")
             for window in list(app.main_windows):
                 window.close()
@@ -66,7 +82,6 @@ def run(version):
             check(terminal_tab is not None, "terminal tab")
             app.settings_action()
             check(app.settingswindow is not None, "settings with search and profiles")
-            app.settingswindow.close()
             app.downloads_action()
             check(app.downloads_window is not None, "download manager")
             app.show_mini_window()
