@@ -6,7 +6,7 @@ import os
 import subprocess
 import gettext
 from ...utility.system import open_website
-from ..widgets import TipsCarousel, SkillWidget
+from ..widgets import TipsCarousel, SkillWidget, CompactionMarkerWidget
 from ...utility.strings import markwon_to_pango
 from ...ui.widgets import Message, MultilineEntry, ToolCallsGroupWidget
 from ...utility.message_chunk import get_message_chunks
@@ -42,6 +42,9 @@ class ChatHistory(Gtk.Box):
         self.lazy_loading_in_progress = False
         self._initial_load_generation = 0
         self._initial_load_source_id = None
+        self._pending_load_range = None
+        self._deletion_scroll_pending = False
+        self._deletion_generation = 0
         self.scroll_handler_id = None  # Store scroll handler ID to disconnect when needed
         self.scroll_bounds_handler_id = None
         self._follow_new_content = True
@@ -56,6 +59,7 @@ class ChatHistory(Gtk.Box):
         self._compact_tool_groups = {}
         self._active_compact_tool_group = None
         self._compact_hidden_rows = set()
+        self._compaction_marker_row = None
         # Suggestions vars
         self.message_suggestion_buttons_array = []
         self.message_suggestion_buttons_array_placeholder = []
@@ -128,7 +132,14 @@ class ChatHistory(Gtk.Box):
         self.update_button_text()
 
     def populate_chat(self):
+        self._deletion_generation += 1
+        self._deletion_scroll_pending = False
         self._initial_load_generation += 1
+        if self._initial_load_source_id is not None:
+            GLib.source_remove(self._initial_load_source_id)
+            self._initial_load_source_id = None
+        self._pending_load_range = None
+        self.lazy_loading_in_progress = False
         self._compact_tool_groups = {}
         self._active_compact_tool_group = None
         self._compact_hidden_rows = set()
@@ -180,6 +191,8 @@ class ChatHistory(Gtk.Box):
             self.lazy_loaded_start = 0
             self.lazy_loaded_end = total_messages
             for i in range(len(self.chat)):
+                if self.chat[i].get("ToolContext"):
+                    continue
                 if self.chat[i]["User"] == "User":
                     self.show_message(self.chat[i]["Message"], True, id_message=i, is_user=True)
                 elif self.chat[i]["User"] == "Assistant":
@@ -207,7 +220,8 @@ class ChatHistory(Gtk.Box):
                                 if result and result.widget is not None:
                                     self.add_message("Command", result.widget, id_message=i, editable=True)
                 elif self.chat[i]["User"] in ["File", "Folder"]:
-                    self.add_message(self.chat[i]["User"], self.get_file_button(self.chat[i]["Message"][1 : len(self.chat[i]["Message"])]))
+                    self.add_message(self.chat[i]["User"], self.get_file_button(self.chat[i]["Message"][1 : len(self.chat[i]["Message"])]), id_message=i)
+        GLib.idle_add(self.refresh_compaction_marker)
         GLib.timeout_add(200, self.scrolled_chat)
         GLib.idle_add(self.update_button_text)
 
@@ -219,11 +233,11 @@ class ChatHistory(Gtk.Box):
         responsive while still reconstructing the complete shared group.
         """
         generation = self._initial_load_generation
-        next_index = start_idx
+        pending = [start_idx, end_idx]
+        self._pending_load_range = pending
         self.lazy_loading_in_progress = True
 
         def load_next():
-            nonlocal next_index
             if (
                 generation != self._initial_load_generation
                 or self.get_parent() is None
@@ -232,10 +246,12 @@ class ChatHistory(Gtk.Box):
                 self._initial_load_source_id = None
                 return GLib.SOURCE_REMOVE
 
-            while next_index < end_idx:
-                index = next_index
-                next_index += 1
+            while pending[0] < pending[1]:
+                index = pending[0]
+                pending[0] += 1
                 entry = self.chat[index]
+                if entry.get("ToolContext"):
+                    continue
                 self._load_message_range(index, index + 1)
                 if (
                     entry.get("User")
@@ -247,10 +263,12 @@ class ChatHistory(Gtk.Box):
                 ):
                     break
 
-            if next_index >= end_idx:
+            if pending[0] >= pending[1]:
+                self._pending_load_range = None
                 self.lazy_loading_in_progress = False
                 self._initial_load_source_id = None
                 GLib.idle_add(self.prune_compact_empty_rows)
+                GLib.idle_add(self.refresh_compaction_marker)
                 GLib.idle_add(self.scrolled_chat)
                 return GLib.SOURCE_REMOVE
 
@@ -461,6 +479,8 @@ class ChatHistory(Gtk.Box):
 
     def _message_widgets(self):
         roots = list(self.messages_box)
+        roots.extend(box.editing_message for box in self._message_bubbles()
+                     if getattr(box, "editing_message", None) is not None)
         # The active streaming row is intentionally removed from
         # ``messages_box`` bookkeeping until generation finishes, but it is
         # still a live child of the ListBox and must participate in toggles.
@@ -494,7 +514,7 @@ class ChatHistory(Gtk.Box):
 
     def scrolled_chat(self):
         """Follow new content only while the user has not scrolled away."""
-        if not self._follow_new_content:
+        if self._deletion_scroll_pending or not self._follow_new_content:
             return GLib.SOURCE_REMOVE
 
         self.chat_scroll.queue_resize()
@@ -505,7 +525,7 @@ class ChatHistory(Gtk.Box):
     def _do_scroll(self):
         """Move to the exact bottom without treating it as user input."""
         self._scroll_to_bottom_source_id = None
-        if not self._follow_new_content:
+        if self._deletion_scroll_pending or not self._follow_new_content:
             return GLib.SOURCE_REMOVE
 
         adjustment = self.chat_scroll.get_vadjustment()
@@ -546,6 +566,9 @@ class ChatHistory(Gtk.Box):
 
     def update_button_text(self):
         """Update clear chat, regenerate message and continue buttons, add offers"""
+        for box in self._message_bubbles():
+            if hasattr(box, "delete_button"):
+                box.delete_button.set_sensitive(self.status)
         for btn in self.message_suggestion_buttons_array + self.message_suggestion_buttons_array_placeholder:
             btn.set_visible(False)
         self.button_clear.set_visible(False)
@@ -887,7 +910,7 @@ class ChatHistory(Gtk.Box):
         j = id_message - 1
         while j >= 0:
             entry = self.chat[j]
-            if entry.get("User") == "Console":
+            if entry.get("User") == "Console" or entry.get("ToolContext"):
                 j -= 1
                 continue
             if entry.get("User") == "Assistant" and not str(
@@ -949,33 +972,39 @@ class ChatHistory(Gtk.Box):
                 halign=Gtk.Align.FILL,
             )
             col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True, halign=Gtk.Align.FILL)
-            if continuation:
-                # Reserve the avatar column so the text aligns under the previous msg
-                spacer = Gtk.Box()
-                spacer.set_size_request(36, 1)
-                inner.append(spacer)
-                col.append(bubble)
-            else:
-                avatar = self._make_avatar(profile_name)
-                avatar.set_valign(Gtk.Align.START)
-                name = profile_name or self.controller.newelle_settings.current_profile
-                col.append(Gtk.Label(
-                    label=name, halign=Gtk.Align.START, xalign=0, css_classes=["bubble-sender"],
-                ))
-                col.append(bubble)
-                inner.append(avatar)
-            inner.append(col)
-            # Overlay so the action toolbar floats without affecting layout
-            row = Gtk.Overlay()
-            row.set_child(inner)
+            avatar = self._make_avatar(profile_name)
+            avatar.set_valign(Gtk.Align.START)
+            spacer = Gtk.Box()
+            spacer.set_size_request(36, 1)
+            name = profile_name or self.controller.newelle_settings.current_profile
+            label = Gtk.Label(label=name, halign=Gtk.Align.START, xalign=0,
+                              css_classes=["bubble-sender"])
+            avatar.set_visible(not continuation)
+            label.set_visible(not continuation)
+            spacer.set_visible(continuation)
+            inner.append(avatar)
+            inner.append(spacer)
+            # Keep message actions in the sender/header line.  This gives the
+            # toolbar a dedicated horizontal slot without adding a vertical
+            # band above message content or overlaying controls in the bubble.
+            header = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL,
+                hexpand=True,
+                halign=Gtk.Align.FILL,
+            )
+            header.append(label)
             if toolbar is not None:
                 toolbar.set_halign(Gtk.Align.END)
-                toolbar.set_valign(Gtk.Align.START)
-                toolbar.set_margin_top(6)
+                toolbar.set_valign(Gtk.Align.CENTER)
                 toolbar.set_margin_end(8)
-                row.add_overlay(toolbar)
-                self._wire_row_hover(row, toolbar)
-            return row
+                header.append(toolbar)
+            col.append(header)
+            col.append(bubble)
+            bubble.sender_widgets = (inner, avatar, spacer, label)
+            inner.append(col)
+            if toolbar is not None:
+                self._wire_row_hover(inner, toolbar)
+            return inner
 
         if user_type in ("User", "File", "Folder"):
             row = Gtk.Box(
@@ -1006,7 +1035,7 @@ class ChatHistory(Gtk.Box):
         bubble.set_margin_end(8)
         return bubble
 
-    def add_message(self, user, message=None, id_message=0, editable=False, profile_name=None):
+    def add_message(self, user, message=None, id_message=None, editable=False, profile_name=None):
         """Add a message to the chat and return the box
 
         Args:
@@ -1025,12 +1054,15 @@ class ChatHistory(Gtk.Box):
             margin_end=0,
             halign=Gtk.Align.FILL,
         )
+        if id_message is None and user in ("User", "Assistant", "Command", "File", "Folder"):
+            id_message = len(self.chat) - 1
+        self._track_message_box(box, id_message, user, profile_name)
         self.messages_box.append(box)
         # Group consecutive messages from the same sender (hide avatar/name)
         box.is_continuation = self._is_continuation(user, id_message, profile_name)
 
         # Update lazy_loaded_end when a message is displayed beyond the current range
-        if self.lazy_load_enabled:
+        if self.lazy_load_enabled and id_message is not None:
             if id_message >= self.lazy_loaded_end:
                 self.lazy_loaded_end = id_message + 1
 
@@ -1048,6 +1080,7 @@ class ChatHistory(Gtk.Box):
             evk = Gtk.GestureClick.new()
             evk.connect("pressed", self.edit_message, box, apply_edit_stack)
             evk.set_name(str(id_message))
+            box.message_controls.append(evk)
             evk.set_button(3)
             box.add_controller(evk)
 
@@ -1201,7 +1234,7 @@ class ChatHistory(Gtk.Box):
             valign=Gtk.Align.CENTER,
         )
         copy_button.set_tooltip_text(_("Copy"))
-        copy_button.connect("clicked", self.copy_message, int(id))
+        copy_button.connect("clicked", lambda btn: self.copy_message(btn, box.message_index))
         actions.append(edit_button)
         actions.append(copy_button)
         if has_prompt:
@@ -1211,7 +1244,7 @@ class ChatHistory(Gtk.Box):
                 valign=Gtk.Align.CENTER,
             )
             info_button.set_tooltip_text(_("Show prompt"))
-            info_button.connect("clicked", self.show_prompt, int(id))
+            info_button.connect("clicked", lambda btn: self.show_prompt(btn, box.message_index))
             actions.append(info_button)
         branch_button = Gtk.Button(
             icon_name="branch-symbolic",
@@ -1220,7 +1253,7 @@ class ChatHistory(Gtk.Box):
             name=id,
         )
         branch_button.set_tooltip_text(_("Branch chat"))
-        branch_button.connect("clicked", lambda btn: self.emit("branch-requested", int(id)))
+        branch_button.connect("clicked", lambda btn: self.emit("branch-requested", box.message_index))
         actions.append(branch_button)
         remove_button = Gtk.Button(
             icon_name="user-trash-symbolic",
@@ -1230,6 +1263,9 @@ class ChatHistory(Gtk.Box):
         )
         remove_button.set_tooltip_text(_("Delete"))
         remove_button.connect("clicked", self.delete_message, box)
+        box.delete_button = remove_button
+        remove_button.set_sensitive(self.status)
+        box.message_controls.extend((apply_button, cancel_button, edit_button, branch_button, remove_button))
         actions.append(remove_button)
 
         apply_edit_stack.add_named(apply_box, "apply")
@@ -1247,13 +1283,15 @@ class ChatHistory(Gtk.Box):
             box: box of the message
             apply_edit_stack: stack with the edit controls
         """
-        entry = self.edit_entries[int(gesture.get_name())]
-        self.focus_input()
+        if not self.status:
+            return
+        entry = self.edit_entries[box.message_index]
         # Delete message
         if entry.get_text() == "":
             self.delete_message(gesture, box)
             return
 
+        self.focus_input()
         overlay = box.get_first_child()
         if overlay is None:
             return
@@ -1274,7 +1312,10 @@ class ChatHistory(Gtk.Box):
                 return_widget=True,
             )
         )
+        box.editing_message = None
         del self.edit_entries[int(gesture.get_name())]
+        # Editing a compacted message invalidates the saved checkpoint.
+        self.refresh_compaction_marker()
 
 
     def cancel_edit_message(self, gesture, box: Gtk.Box, apply_edit_stack: Gtk.Stack):
@@ -1297,40 +1338,206 @@ class ChatHistory(Gtk.Box):
 
         apply_edit_stack.set_visible_child_name("edit")
         content_box.remove(entry)
-        content_box.append(
-            self.show_message(
-                self.chat[int(gesture.get_name())]["Message"],
-                restore=True,
-                id_message=int(gesture.get_name()),
-                is_user=self.chat[int(gesture.get_name())]["User"] == "User",
-                return_widget=True,
+        old_message = getattr(box, "editing_message", None)
+        if old_message is not None:
+            content_box.append(old_message)
+        else:
+            content_box.append(
+                self.show_message(
+                    self.chat[box.message_index]["Message"],
+                    restore=True,
+                    id_message=box.message_index,
+                    is_user=self.chat[box.message_index]["User"] == "User",
+                    return_widget=True,
+                )
             )
-        )
+        box.editing_message = None
         del self.edit_entries[int(gesture.get_name())]
 
+    @staticmethod
+    def _track_message_box(box, index, user, profile):
+        box.message_index = index
+        box.message_user = user
+        box.message_profile = profile
+        box.message_controls = []
+
+    def _message_bubbles(self):
+        """Include lazy wrappers and completed streaming rows outside messages_box."""
+        roots = list(self.messages_box)
+        row = self.chat_list_block.get_first_child()
+        while row is not None:
+            roots.append(row)
+            row = row.get_next_sibling()
+        seen = set()
+        while roots:
+            widget = roots.pop()
+            if id(widget) in seen:
+                continue
+            seen.add(id(widget))
+            if hasattr(widget, "message_index"):
+                yield widget
+                continue
+            child = widget.get_first_child()
+            while child is not None:
+                roots.append(child)
+                child = child.get_next_sibling()
+
+    def _reconcile_deleted_tool_groups(self, messages, removed):
+        """Transfer live expanders and regroup surviving slots without restoring tools."""
+        for message in removed:
+            # Invalidate any queued initial render of a now-deleted message.
+            message._render_serial += 1
+            group = message.tool_calls_group
+            if group is not None:
+                for slot in message._tool_slots_in_order():
+                    group.remove_slot(slot)
+                for widget in list(message._compact_moved_widgets):
+                    group.remove_auxiliary_widget(widget)
+                message._compact_moved_widgets.clear()
+
+        survivors = [message for message in messages if message not in removed]
+        groups = {}
+        for message in sorted(survivors, key=lambda item: item.id_message):
+            group = message.tool_calls_group
+            if group is None:
+                continue
+            owner = getattr(group, "owner_message", None)
+            if owner in removed:
+                parent = group.get_parent()
+                if parent is not None:
+                    parent.remove(group)
+                group.owner_message = message
+            if self.controller.newelle_settings.compact_mode:
+                key = self._tool_chain_start(message.id_message)
+                target = groups.setdefault(key, group)
+                if target is not group:
+                    message._restore_intermediate_widgets()
+                    message.attach_tool_group(target)
+                message._attach_compact_tool_group()
+            else:
+                groups[message.id_message] = group
+        self._compact_tool_groups = groups
+        self._active_compact_tool_group = next(reversed(groups.values()), None)
+        if self.controller.newelle_settings.compact_mode:
+            for message in survivors:
+                self.prune_compact_message_row(message)
+
     def delete_message(self, gesture, box):
-        """Delete a message from the chat
+        """Remove one record and its Console results without rebuilding the chat."""
+        if not self.status:
+            return
+        idx = box.message_index
+        if idx is None or not 0 <= idx < len(self.chat):
+            return
+        end = idx + 1
+        while end < len(self.chat) and self.chat[end].get("User") == "Console":
+            end += 1
+        count = end - idx
 
-        Args:
-            gesture (): widget with the id of the message to edit as name
-            box (): box of the message
-        """
-        idx = int(gesture.get_name())
-        if idx < len(self.chat):
-            del self.chat[idx]
-        
-        # Also delete subsequent Console messages
-        while idx < len(self.chat) and self.chat[idx].get("User") == "Console":
-            del self.chat[idx]
+        def reindex(index):
+            if index is None or index < idx:
+                return index
+            return index - count if index >= end else idx
 
-        try:
-            # Bubbles are wrapped in an avatar row inside the ListBoxRow
-            self.chat_list_block.remove(box.get_ancestor(Gtk.ListBoxRow))
-            self.messages_box.remove(box)
-        except Exception:
-            pass
+        bubbles = list(self._message_bubbles())
+        messages = list(self._message_widgets())
+        removed_messages = [m for m in messages if idx <= m.id_message < end]
+        removed_rows = {
+            bubble.get_ancestor(Gtk.ListBoxRow)
+            for bubble in bubbles
+            if bubble.message_index is not None and idx <= bubble.message_index < end
+        }
+        removed_rows.discard(None)
+
+        adjustment = self.chat_scroll.get_vadjustment()
+        old_value = adjustment.get_value()
+        anchor = None
+        offset = 0
+        row = self.chat_list_block.get_first_child()
+        while row is not None:
+            if row not in removed_rows and row.get_visible():
+                valid, bounds = row.compute_bounds(self.chat_list_block)
+                if valid and bounds.get_y() + bounds.get_height() > old_value:
+                    anchor = row
+                    offset = bounds.get_y() - old_value
+                    break
+            row = row.get_next_sibling()
+        self._pause_auto_scroll()
+        self._deletion_generation += 1
+        deletion_generation = self._deletion_generation
+        self._deletion_scroll_pending = True
+
+        del self.chat[idx:end]
+        self.edit_entries = {reindex(i): entry for i, entry in self.edit_entries.items()
+                             if not idx <= i < end}
+        self.lazy_loaded_start = reindex(self.lazy_loaded_start)
+        self.lazy_loaded_end = reindex(self.lazy_loaded_end)
+        if self._pending_load_range is not None:
+            self._pending_load_range[:] = [reindex(i) for i in self._pending_load_range]
+
+        for bubble in bubbles:
+            index = bubble.message_index
+            if index is None:
+                continue
+            if idx <= index < end:
+                continue
+            bubble.message_index = reindex(index)
+            for control in bubble.message_controls:
+                control.set_name(str(bubble.message_index))
+            continuation = self._is_continuation(
+                bubble.message_user, bubble.message_index, bubble.message_profile)
+            if continuation != bubble.is_continuation:
+                bubble.is_continuation = continuation
+                if hasattr(bubble, "sender_widgets"):
+                    inner, avatar, spacer, label = bubble.sender_widgets
+                    inner.set_margin_top(2 if continuation else 8)
+                    avatar.set_visible(not continuation)
+                    label.set_visible(not continuation)
+                    spacer.set_visible(continuation)
+        for message in messages:
+            if message not in removed_messages:
+                message.reindex_after_deletion(idx, end)
+        self._reconcile_deleted_tool_groups(messages, removed_messages)
+
+        for row in removed_rows:
+            self._compact_hidden_rows.discard(row)
+            self.messages_box[:] = [item for item in self.messages_box
+                                    if item is not row and item.get_ancestor(Gtk.ListBoxRow) is not row]
+            self.chat_list_block.remove(row)
         self.controller.save_chats()
-        self.show_chat()
+        if not self.chat:
+            self.show_placeholder()
+        self.update_button_text()
+        self.refresh_compaction_marker()
+
+        # Tick callbacks precede layout. Wait one frame for GTK to allocate
+        # the shortened history before restoring the surviving row's offset.
+        first_frame = True
+
+        def restore_scroll(_widget, _clock):
+            nonlocal first_frame
+            if deletion_generation != self._deletion_generation:
+                return GLib.SOURCE_REMOVE
+            if first_frame:
+                first_frame = False
+                return GLib.SOURCE_CONTINUE
+            value = old_value
+            if anchor is not None and anchor.get_parent() is self.chat_list_block:
+                valid, bounds = anchor.compute_bounds(self.chat_list_block)
+                if valid:
+                    value = bounds.get_y() - offset
+            self._programmatic_scroll = True
+            adjustment.set_value(max(adjustment.get_lower(), min(
+                value, adjustment.get_upper() - adjustment.get_page_size())))
+            self._last_scroll_value = adjustment.get_value()
+            self._programmatic_scroll = False
+            self._deletion_scroll_pending = False
+            return GLib.SOURCE_REMOVE
+
+        if self.chat:
+            self.chat_list_block.add_tick_callback(restore_scroll)
+        else:
+            self._deletion_scroll_pending = False
 
     def add_prompt(self, prompt):
         """Store prompt text on the most recently appended chat entry."""
@@ -1338,80 +1545,19 @@ class ChatHistory(Gtk.Box):
             self.chat[-1]["Prompt"] = prompt
 
     def show_prompt(self, button, id):
-        """Show a prompt
+        """Show the token, cache and cost details of the prompt of a message
 
         Args:
-            id (): id of the prompt to show
+            id (): id of the message whose prompt is shown
         """
-        # Retrieve prompt data
-        prompt_data = self.chat[id]
-        prompt_text = prompt_data.get("Prompt", "")
-        input_tokens = prompt_data.get("InputTokens", 0)
-        output_tokens = prompt_data.get("OutputTokens", 0)
-        elapsed = prompt_data.get("enlapsed", 0.0)
+        from .prompt_details import PromptDetailsDialog
 
-        speed = 0.0
-        if elapsed > 0:
-            speed = output_tokens / elapsed
-
-        dialog = Adw.Dialog(can_close=True)
-        dialog.set_title(_("Prompt Details"))
-
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content.append(
-            Adw.HeaderBar(css_classes=["flat"], show_start_title_buttons=True)
+        dialog = PromptDetailsDialog(
+            self.chat[id],
+            self.controller.settings,
+            on_open_usage=lambda: self.app.settings_action_paged("Usage"),
         )
-
-        scroll = Gtk.ScrolledWindow(propagate_natural_width=True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_vexpand(True)
-        
-        clamp = Adw.Clamp(maximum_size=600, margin_top=24, margin_bottom=24, margin_start=12, margin_end=12)
-        scroll.set_child(clamp)
-
-        inner_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
-        clamp.set_child(inner_box)
-
-        # Statistics
-        stats_group = Adw.PreferencesGroup(title=_("Statistics"))
-        inner_box.append(stats_group)
-
-        row_input = Adw.ActionRow(title=_("Input Tokens"), subtitle=str(input_tokens))
-        stats_group.add(row_input)
-
-        row_output = Adw.ActionRow(title=_("Output Tokens"), subtitle=str(output_tokens))
-        stats_group.add(row_output)
-
-        row_speed = Adw.ActionRow(title=_("Generation Speed"), subtitle=f"{speed:.2f} tokens/s")
-        stats_group.add(row_speed)
-
-        # Prompt
-        prompt_group = Adw.PreferencesGroup(title=_("Prompt"))
-        inner_box.append(prompt_group)
-
-        prompt_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        prompt_card.add_css_class("card")
-        
-        label = Gtk.Label(
-            label=prompt_text,
-            wrap=True,
-            wrap_mode=Pango.WrapMode.WORD,
-            selectable=True,
-            halign=Gtk.Align.START,
-            xalign=0,
-            margin_top=12,
-            margin_bottom=12,
-            margin_start=12,
-            margin_end=12
-        )
-        prompt_card.append(label)
-        prompt_group.add(prompt_card)
-
-        content.append(scroll)
-        dialog.set_child(content)
-        dialog.set_content_width(500)
-        dialog.set_content_height(600)
-        dialog.present()
+        dialog.present(self.get_root())
 
     def copy_message(self, button, id):
         """Copy a message
@@ -1486,6 +1632,7 @@ class ChatHistory(Gtk.Box):
         entry.set_on_enter(
             lambda entry: self.apply_edit_message(gesture, box, apply_edit_stack)
         )
+        box.editing_message = old_message if isinstance(old_message, Message) else None
         content_box.remove(old_message)
         content_box.append(entry)
 
@@ -1499,6 +1646,7 @@ class ChatHistory(Gtk.Box):
             margin_end=0,
             halign=Gtk.Align.FILL,
         )
+        self._track_message_box(wrapper_box, id_message, user_type, profile_name)
         # Group consecutive messages from the same sender (hide avatar/name)
         wrapper_box.is_continuation = self._is_continuation(user_type, id_message, profile_name)
 
@@ -1516,6 +1664,7 @@ class ChatHistory(Gtk.Box):
             evk = Gtk.GestureClick.new()
             evk.connect("pressed", self.edit_message, wrapper_box, apply_edit_stack)
             evk.set_name(str(id_message))
+            wrapper_box.message_controls.append(evk)
             evk.set_button(3)
             wrapper_box.add_controller(evk)
 
@@ -1542,6 +1691,9 @@ class ChatHistory(Gtk.Box):
     def _load_message_range(self, start_idx: int, end_idx: int):
         """Load messages in the specified range (start_idx inclusive, end_idx exclusive)"""
         for i in range(start_idx, end_idx):
+            # Synthetic tool context belongs to the model, not the user UI.
+            if self.chat[i].get("ToolContext"):
+                continue
             if self.chat[i]["User"] == "User":
                 self.show_message(
                     self.chat[i]["Message"], True, id_message=i, is_user=True
@@ -1576,10 +1728,13 @@ class ChatHistory(Gtk.Box):
                     self.get_file_button(
                         self.chat[i]["Message"][1 : len(self.chat[i]["Message"])]
                     ),
+                    id_message=i,
                 )
     
     def _on_scroll_changed(self, adjustment):
         """Track user scroll intent and trigger lazy loading of messages."""
+        if self._deletion_scroll_pending:
+            return
         value = adjustment.get_value()
         at_bottom = self._is_at_bottom(adjustment)
         moved_up = (
@@ -1594,7 +1749,7 @@ class ChatHistory(Gtk.Box):
             self._follow_new_content = True
         self._last_scroll_value = value
 
-        if not self.lazy_load_enabled or self.lazy_loading_in_progress:
+        if self._deletion_scroll_pending or not self.lazy_load_enabled or self.lazy_loading_in_progress:
             return
         
         if len(self.chat) <= self.lazy_load_batch_size:
@@ -1642,6 +1797,8 @@ class ChatHistory(Gtk.Box):
         new_rows = []
         
         for i in range(new_start, self.lazy_loaded_start):
+            if self.chat[i].get("ToolContext"):
+                continue
             # Create message content box using show_message with return_widget=True
             if self.chat[i]["User"] == "User":
                 content_box = self.show_message(
@@ -1667,6 +1824,17 @@ class ChatHistory(Gtk.Box):
                 row = Gtk.ListBoxRow()
                 row.set_child(wrapper_box)
                 new_rows.append(row)
+                continue
+            elif self.chat[i]["User"] == "Command":
+                previous_count = len(self.messages_box)
+                self._load_message_range(i, i + 1)
+                for wrapper in self.messages_box[previous_count:]:
+                    row = wrapper.get_ancestor(Gtk.ListBoxRow)
+                    if row is not None:
+                        self.chat_list_block.remove(row)
+                        new_rows.append(row)
+                        new_messages_box_items.append(wrapper)
+                del self.messages_box[previous_count:]
                 continue
             elif self.chat[i]["User"] in ["File", "Folder"]:
                 # For file/folder messages, create the wrapper box manually
@@ -1697,9 +1865,17 @@ class ChatHistory(Gtk.Box):
             self.messages_box.insert(0, box)
         
         self.lazy_loaded_start = new_start
+        self.refresh_compaction_marker()
         
         # Restore scroll position (adjust for new content height)
-        GLib.idle_add(lambda: self._restore_scroll_position(current_value, current_upper))
+        deletion_generation = self._deletion_generation
+
+        def restore_prepend_scroll():
+            if deletion_generation == self._deletion_generation:
+                self._restore_scroll_position(current_value, current_upper)
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(restore_prepend_scroll)
         self.lazy_loading_in_progress = False
     
     def _load_newer_messages(self):
@@ -1754,7 +1930,7 @@ class ChatHistory(Gtk.Box):
         else:
             name = "image-missing"
         icon = Gtk.Image(icon_name=name)
-        icon.set_css_classes(["large"])
+        icon.set_css_classes(["newelle-icon-large"])
         box.append(icon)
         box.append(vbox)
         vbox.set_size_request(250, -1)
@@ -1823,11 +1999,58 @@ class ChatHistory(Gtk.Box):
             self.chat[message_idx]["Message"][1 : len(self.chat[message_idx]["Message"])]
         )
 
+    def refresh_compaction_marker(self):
+        """Place the context compaction divider after the last compacted message."""
+        row = self._compaction_marker_row
+        if row is not None and row.get_parent() is not self.chat_list_block:
+            row = self._compaction_marker_row = None
+        marker = self.controller.get_compaction_marker(self.chat_id) if self.chat else None
+        # The boundary is not loaded yet; lazy loading refreshes the marker.
+        if marker is None or self.lazy_loaded_start > marker[0] + 1:
+            if row is not None:
+                self.chat_list_block.remove(row)
+                self._compaction_marker_row = None
+            return GLib.SOURCE_REMOVE
+        boundary, summary = marker
+
+        anchor = None
+        anchor_index = -1
+        for bubble in self._message_bubbles():
+            index = bubble.message_index
+            if index is None or not anchor_index < index <= boundary:
+                continue
+            candidate = bubble.get_ancestor(Gtk.ListBoxRow)
+            if candidate is not None and candidate is not row and candidate.get_parent() is self.chat_list_block:
+                anchor, anchor_index = candidate, index
+
+        if row is not None:
+            in_place = (row.get_prev_sibling() is anchor if anchor is not None
+                        else row.get_index() == self._preamble_row_count)
+            if in_place:
+                row.get_child().set_summary(summary)
+                return GLib.SOURCE_REMOVE
+            self.chat_list_block.remove(row)
+
+        position = anchor.get_index() + 1 if anchor is not None else self._preamble_row_count
+        row = Gtk.ListBoxRow(activatable=False, selectable=False, focusable=False)
+        row.set_child(CompactionMarkerWidget(summary))
+        self.chat_list_block.insert(row, position)
+        self._compaction_marker_row = row
+        return GLib.SOURCE_REMOVE
+
     def show_chat(self):
         """Reload and display all messages from the chat"""
+        self._deletion_generation += 1
+        self._deletion_scroll_pending = False
         self._initial_load_generation += 1
+        if self._initial_load_source_id is not None:
+            GLib.source_remove(self._initial_load_source_id)
+            self._initial_load_source_id = None
+        self._pending_load_range = None
+        self.lazy_loading_in_progress = False
         # Clear existing messages from UI
         self.chat_list_block.remove_all()
+        self._compaction_marker_row = None
         self.messages_box.clear()
         self.last_error_box = None
         # Groups contain live Message/slot widgets, so never reuse them across
@@ -1850,6 +2073,8 @@ class ChatHistory(Gtk.Box):
 
         # Re-populate the chat with all messages
         for i in range(len(self.chat)):
+            if self.chat[i].get("ToolContext"):
+                continue
             if self.chat[i]["User"] == "User":
                 self.show_message(self.chat[i]["Message"], True, id_message=i, is_user=True)
             elif self.chat[i]["User"] == "Assistant":
@@ -1857,7 +2082,7 @@ class ChatHistory(Gtk.Box):
             elif self.chat[i]["User"] == "Console" and self.chat[i].get("skill_name"):
                 self._add_skill_message(i)
             elif self.chat[i]["User"] in ["File", "Folder"]:
-                self.add_message(self.chat[i]["User"], self.get_file_button(self.chat[i]["Message"][1 : len(self.chat[i]["Message"])]))
+                self.add_message(self.chat[i]["User"], self.get_file_button(self.chat[i]["Message"][1 : len(self.chat[i]["Message"])]), id_message=i)
             elif self.chat[i]["User"] == "Command":
                 cmd_name = self.chat[i]["Message"]
                 cmd = self.controller.get_command(cmd_name)
@@ -1865,7 +2090,7 @@ class ChatHistory(Gtk.Box):
                     if cmd.restore is not None:
                         r = cmd.restore()
                         if r.widget is not None:
-                            self.add_message("Command", r.widget)
+                            self.add_message("Command", r.widget, id_message=i)
                         
         # Reset lazy loading state
         total_messages = len(self.chat)
@@ -1877,6 +2102,7 @@ class ChatHistory(Gtk.Box):
             self.lazy_loaded_end = total_messages
 
         # Update UI state
+        GLib.idle_add(self.refresh_compaction_marker)
         GLib.idle_add(self.scrolled_chat)
         GLib.idle_add(self.update_button_text)
 
@@ -1936,6 +2162,7 @@ class ChatHistory(Gtk.Box):
             if child is None:
                 break
             self.chat_list_block.remove(child)
+        self._compaction_marker_row = None
         self.messages_box = []
         self.edit_entries = {}
         self._compact_hidden_rows = set()
