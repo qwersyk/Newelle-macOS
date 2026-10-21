@@ -83,6 +83,9 @@ if [[ ! -d "$VENV_DIR" ]]; then
   "$BREW_PYTHON_BIN" -m venv --system-site-packages "$VENV_DIR"
 fi
 "$VENV_DIR/bin/pip" install --disable-pip-version-check -r "$ROOT/macos/requirements.txt"
+# Homebrew may build pygobject3 for a newer Python than the bundled runtime.
+# Verify the exact interpreter before copying a bundle that cannot start.
+"$VENV_DIR/bin/python" -c 'import gi, cairo; gi.require_version("Gtk", "4.0"); from gi.repository import Gtk'
 
 if [[ -e "$APP_DIR" ]] && ! rm -rf "$APP_DIR" 2>/dev/null; then
   echo "Cannot replace $APP_DIR"
