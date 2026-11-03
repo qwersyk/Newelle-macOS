@@ -54,3 +54,14 @@ def install_native_window_behavior(_application, window):
     if sys.platform != "darwin":
         return
     window.connect("map", configure_native_window)
+
+
+def wake_for_shutdown():
+    """Unwind AppKit's nested polling loop so GApplication can observe quit."""
+    if sys.platform != "darwin":
+        return
+    from CoreFoundation import CFRunLoopGetMain, CFRunLoopStop, CFRunLoopWakeUp
+
+    run_loop = CFRunLoopGetMain()
+    CFRunLoopStop(run_loop)
+    CFRunLoopWakeUp(run_loop)

@@ -980,6 +980,12 @@ class MyApp(Adw.Application):
             window.close()
         if not self.main_windows:
             self.quit()
+
+    def quit(self):
+        Gio.Application.quit(self)
+        GLib.MainContext.default().wakeup()
+        from .utility.macos_window import wake_for_shutdown
+        wake_for_shutdown()
     
     def do_shutdown(self):
         from .utility.command_runner import shutdown_command_executions
