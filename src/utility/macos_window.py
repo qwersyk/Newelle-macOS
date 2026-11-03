@@ -60,8 +60,15 @@ def wake_for_shutdown():
     """Unwind AppKit's nested polling loop so GApplication can observe quit."""
     if sys.platform != "darwin":
         return
+    from AppKit import NSApplication
     from CoreFoundation import CFRunLoopGetMain, CFRunLoopStop, CFRunLoopWakeUp
 
+    # A native file panel can leave AppKit tracking the menu bar from its
+    # deferred focus handoff. That nested loop must finish before GTK's poll
+    # function returns to GApplication and observes the quit request.
+    menu = NSApplication.sharedApplication().mainMenu()
+    if menu is not None:
+        menu.cancelTrackingWithoutAnimation()
     run_loop = CFRunLoopGetMain()
     CFRunLoopStop(run_loop)
     CFRunLoopWakeUp(run_loop)
