@@ -241,6 +241,13 @@ def handle_text_input_key_pressed(widget, keyval, state) -> bool:
         if lowered == Gdk.KEY_a:
             if isinstance(focus, Gtk.Editable):
                 return _select_all_editable(focus)
+            if isinstance(focus, Gtk.TextView):
+                buffer = focus.get_buffer()
+                buffer.select_range(*buffer.get_bounds())
+                return True
+            if isinstance(focus, Gtk.Label) and focus.get_selectable():
+                focus.select_region(0, -1)
+                return True
             return bool(focus.activate_action("selection.select-all", None))
         if lowered == Gdk.KEY_z:
             if state & Gdk.ModifierType.SHIFT_MASK:

@@ -13,7 +13,8 @@ class Shortcuts(Gtk.Window):
         gr = Gtk.ShortcutsGroup(title=_("Shortcuts"))
         gr.append(Gtk.ShortcutsShortcut(title=_("New chat"), accelerator=primary_accel("n")))
         gr.append(Gtk.ShortcutsShortcut(title=_("New tab"), accelerator=primary_accel("t")))
-        gr.append(Gtk.ShortcutsShortcut(title=_("Open mini window"), accelerator=primary_accel("<Shift>m")))
+        gr.append(Gtk.ShortcutsShortcut(title=_("Switch between full and mini window"), accelerator=primary_accel("<Shift>m")))
+        gr.append(Gtk.ShortcutsShortcut(title=_("Select all"), accelerator=primary_accel("a")))
         gr.append(Gtk.ShortcutsShortcut(title=_("Close window"), accelerator=primary_accel("w")))
         gr.append(Gtk.ShortcutsShortcut(title=_("Quit app"), accelerator=primary_accel("q")))
         gr.append(Gtk.ShortcutsShortcut(title=_("Reload chat"), accelerator=primary_accel("r")))
@@ -26,7 +27,6 @@ class Shortcuts(Gtk.Window):
         gr.append(Gtk.ShortcutsShortcut(title=_("Stop TTS"), accelerator=primary_accel("k")))
         gr.append(Gtk.ShortcutsShortcut(title=_("Zoom in"), accelerator=primary_accel("plus")))
         gr.append(Gtk.ShortcutsShortcut(title=_("Zoom out"), accelerator=primary_accel("minus")))
-        gr.append(Gtk.ShortcutsShortcut(title=_("Switch between full and mini window"), accelerator=primary_accel("d")))
         gr.append(Gtk.ShortcutsShortcut(title=_("Start or cancel Voice Mode"), accelerator=primary_accel("i")))
 
         sect_main.append(gr)

@@ -52,6 +52,27 @@ class ModeToolSchemaTests(unittest.TestCase):
 
 
 class MultilineShortcutTests(unittest.TestCase):
+    def test_command_a_selects_the_whole_multiline_message(self):
+        from gi.repository import Gtk, Gdk
+        from newelle.ui.widgets.multiline import MultilineEntry
+        entry = MultilineEntry()
+        text = "Привет 👋\nsecond line"
+        entry.set_text(text)
+        handled = entry._on_key_pressed(None, Gdk.KEY_a, 0, Gdk.ModifierType.META_MASK)
+        buffer = entry.input_panel.get_buffer()
+        bounds = buffer.get_selection_bounds()
+        self.assertTrue(handled)
+        self.assertTrue(bounds)
+        self.assertEqual(buffer.get_text(*bounds, False), text)
+
+    def test_command_a_selects_all_in_single_line_fields(self):
+        from gi.repository import Gtk, Gdk
+        from newelle.utility.system import handle_text_input_key_pressed
+        entry = Gtk.Entry()
+        entry.set_text("Search text")
+        self.assertTrue(handle_text_input_key_pressed(entry, Gdk.KEY_a, Gdk.ModifierType.META_MASK))
+        self.assertEqual(entry.get_selection_bounds(), (0, len("Search text")))
+
     def test_command_return_sends_when_primary_modifier_is_required(self):
         from gi.repository import Gdk
         from newelle.ui.widgets.multiline import MultilineEntry
