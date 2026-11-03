@@ -494,17 +494,23 @@ class MyApp(Adw.Application):
         if not self.main_windows:
             # Preferences, downloads and other utility windows must not keep a
             # headless application alive after the final chat window closes.
-            self._destroy_application_windows()
+            # Request termination here; do_shutdown owns final destruction.
+            # Destroying auxiliary windows while GTK is still unwinding the
+            # last close event can leave AppKit inside a nested event loop.
             self.quit()
         return GLib.SOURCE_REMOVE
 
     def _destroy_application_windows(self):
         from .utility.file_dialogs import cancel_file_dialog
         for window in list(self.get_windows()):
+            if os.getenv("NEWELLE_DEBUG_WINDOWING") == "1":
+                print("Destroying window:", type(window).__name__, file=sys.__stdout__, flush=True)
             cancel_file_dialog(window)
             if hasattr(window, "_detach_terminal"):
                 window._detach_terminal()
             window.destroy()
+            if os.getenv("NEWELLE_DEBUG_WINDOWING") == "1":
+                print("Window destroyed", file=sys.__stdout__, flush=True)
 
     def workspace_window(self, workspace_id, exclude=None):
         return next((window for window in self.main_windows

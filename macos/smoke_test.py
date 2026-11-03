@@ -4,12 +4,16 @@ import sys
 import os
 from pathlib import Path
 import threading
+import faulthandler
 import time
 import traceback
 from unittest.mock import patch
 
 
 def run(version):
+    # Independent of GLib: a blocked native event loop must produce a useful
+    # stack trace and a failing exit rather than hanging the runner indefinitely.
+    faulthandler.dump_traceback_later(150, exit=True, file=sys.__stderr__)
     import requests
     from AppKit import NSApplication, NSOpenPanel, NSWindowCloseButton
     from gi.repository import Gio, GLib, Gtk
@@ -39,7 +43,7 @@ def run(version):
     app.set_application_id("io.github.qwersyk.Newelle.SmokeTest")
     app.set_flags(app.get_flags() | Gio.ApplicationFlags.NON_UNIQUE)
     app.settings.set_boolean("welcome-screen-shown", True)
-    deadline = time.monotonic() + 230
+    deadline = time.monotonic() + 110
     completed = False
 
     def check(condition, name):
@@ -209,7 +213,7 @@ def run(version):
     def advance():
         try:
             if time.monotonic() >= deadline:
-                raise TimeoutError("UI smoke test exceeded 230 seconds")
+                raise TimeoutError("UI smoke test exceeded 110 seconds")
             delay = next(steps)
             GLib.timeout_add(delay, advance)
         except StopIteration:
@@ -238,7 +242,7 @@ def run(version):
                 app.connect("activate", close_during_startup)
             else:
                 GLib.timeout_add(100, advance)
-            GLib.timeout_add_seconds(235, timeout)
+            GLib.timeout_add_seconds(115, timeout)
             app.run(["Newelle"] + (["--mini"] if "--mini" in sys.argv else []))
         check(completed and not errors, "all lifecycle checks completed")
         check(not app.main_windows and app.mini_win is None, "main and mini owners released on shutdown")
@@ -255,3 +259,4 @@ def run(version):
             window.destroy()
         sys.excepthook = original_hook
         threading.excepthook = original_thread_hook
+        faulthandler.cancel_dump_traceback_later()

@@ -56,12 +56,30 @@ jobs:
       - name: Smoke test packaged app
         env:
           GSK_RENDERER: cairo
-        run: |
-          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test
-          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --mini
-          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --close-during-startup
-          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --direct-quit
-        timeout-minutes: 16
+          NEWELLE_DEBUG_WINDOWING: "1"
+        run: dist/Newelle.app/Contents/MacOS/Newelle --smoke-test
+        timeout-minutes: 3
+
+      - name: Smoke test Mini Window startup
+        env:
+          GSK_RENDERER: cairo
+          NEWELLE_DEBUG_WINDOWING: "1"
+        run: dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --mini
+        timeout-minutes: 3
+
+      - name: Smoke test closing during startup
+        env:
+          GSK_RENDERER: cairo
+          NEWELLE_DEBUG_WINDOWING: "1"
+        run: dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --close-during-startup
+        timeout-minutes: 3
+
+      - name: Smoke test native application shutdown
+        env:
+          GSK_RENDERER: cairo
+          NEWELLE_DEBUG_WINDOWING: "1"
+        run: dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --direct-quit
+        timeout-minutes: 3
 
       - name: Build DMG
         run: NEWELLE_SKIP_APP_BUILD=1 /usr/bin/env bash macos/build_newelle_dmg.sh
