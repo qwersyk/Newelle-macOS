@@ -16,7 +16,7 @@ def run(version):
     faulthandler.dump_traceback_later(150, exit=True, file=sys.__stderr__)
     import requests
     from AppKit import NSApplication, NSOpenPanel, NSWindowCloseButton
-    from gi.repository import Gio, GLib, Gtk
+    from gi.repository import Gio, GLib, Gtk, Adw
     from newelle.main import create_application
     from newelle.controller import HandlersManager
     from newelle.utility.file_dialogs import show_file_dialog
@@ -173,6 +173,21 @@ def run(version):
         check(app.downloads_window is not None, "download manager")
         check(app.settingswindow.get_application() is app and app.downloads_window.get_application() is app,
               "utility windows belong to the application")
+        from newelle.utility.branding import app_icon_name
+        app.on_about_action()
+        about = next(window for window in app.get_windows() if isinstance(window, Adw.AboutWindow))
+        check(about.get_application_icon() == app_icon_name(), "About uses shared application artwork")
+        theme = Gtk.IconTheme.get_for_display(main.get_display())
+        manager = Adw.StyleManager.get_default()
+        previous_scheme = manager.get_color_scheme()
+        for scheme in (Adw.ColorScheme.FORCE_LIGHT, Adw.ColorScheme.FORCE_DARK):
+            manager.set_color_scheme(scheme)
+            icon_name = app_icon_name()
+            icon = theme.lookup_icon(icon_name, None, 128, 1, Gtk.TextDirection.LTR, 0)
+            check(icon.get_file().get_basename() == icon_name + ".png" and about.get_application_icon() == icon_name,
+                  "application artwork follows " + scheme.value_nick)
+        manager.set_color_scheme(previous_scheme)
+        about.close()
         from newelle.ui.voice_mode import VoiceModeWindow
         voice = VoiceModeWindow(application=app, main_window=main, on_closed=lambda *_: None)
         voice.present()
@@ -224,9 +239,22 @@ def run(version):
             app.quit()
         return GLib.SOURCE_REMOVE
 
+    def capture_native_stack():
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="newelle-native-stack-") as directory:
+            path = Path(directory) / "sample.txt"
+            try:
+                subprocess.run(["/usr/bin/sample", str(os.getpid()), "1", "1", "-file", str(path)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+                print(path.read_text()[:45000], file=sys.__stderr__, flush=True)
+            except Exception as error:
+                print("Native stack capture failed:", error, file=sys.__stderr__, flush=True)
+
     def timeout():
         errors.append((TimeoutError, TimeoutError("Application did not quit"), None))
         print("FAIL application did not quit", file=sys.__stderr__, flush=True)
+        threading.Thread(target=capture_native_stack, daemon=True).start()
         app.quit()
         return GLib.SOURCE_REMOVE
 

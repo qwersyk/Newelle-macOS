@@ -15,6 +15,7 @@ import datetime
 from gi.repository import Gtk, Adw, Pango, Gio, Gdk, GObject, GLib, GdkPixbuf
 
 from .utility.file_dialogs import show_file_dialog
+from .utility.branding import app_logo
 from .ui.settings import Settings
 
 from .ui.profile import ProfileDialog, TransferSettingsDialog
@@ -25,7 +26,7 @@ from .ui.explorer import ExplorerPanel
 from .ui.widgets import MultilineEntry, ProfileRow, DisplayLatex, InlineLatex, ThinkingWidget, Message, ChatRow, FolderRow, ChatHistory, ChatTab
 from .ui.stdout_monitor import StdoutMonitorDialog
 from .utility.stdout_capture import StdoutMonitor
-from .constants import AVAILABLE_LLMS, SCHEMA_ID, SETTINGS_GROUPS
+from .constants import AVAILABLE_LLMS, SETTINGS_GROUPS
 from .utility.system import get_spawn_command, install_window_text_input_handlers, open_website, is_flatpak
 from .utility.strings import (
     clean_bot_response,
@@ -498,8 +499,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
 
     def build_splashscreen(self):
         root = Gtk.Box(hexpand=True, vexpand=True, orientation=Gtk.Orientation.VERTICAL,halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        logo = Gtk.Image(icon_name=SCHEMA_ID, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
-        logo.set_pixel_size(120)
+        logo = app_logo(120, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
         root.append(logo)
         return root
 

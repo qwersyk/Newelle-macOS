@@ -262,6 +262,7 @@ utility_sources = [
   'utility/replacehelper.py',
   'utility/strings.py',
   'utility/system.py',
+  'utility/branding.py',
   'utility/file_dialogs.py',
   'utility/macos_window.py',
   'utility/util.py',

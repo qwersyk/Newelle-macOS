@@ -19,6 +19,7 @@ from .ui.shortcuts import Shortcuts
 from .ui.thread_editing import ThreadEditing
 from .ui.scheduled_tasks import ScheduledTasksWindow
 from .utility.system import activate_macos_application, primary_accel
+from .utility.branding import app_icon_name, bind_app_icon
 from .ui.downloads import DownloadsWindow
 from .ui.voice_mode import VoiceModeWindow
 
@@ -421,6 +422,7 @@ class MyApp(Adw.Application):
         GLib.idle_add(self._refresh_native_appearance, priority=GLib.PRIORITY_DEFAULT)
 
     def _refresh_native_appearance(self):
+        Gtk.Window.set_default_icon_name(app_icon_name())
         from .utility.macos_window import configure_native_window
         for window in self.get_windows():
             if window.get_mapped():
@@ -540,9 +542,10 @@ class MyApp(Adw.Application):
 
     def on_about_action(self, *a):
         about = Adw.AboutWindow(
+            application=self,
             transient_for=self.props.active_window,
             application_name='Newelle',
-            application_icon='io.github.qwersyk.Newelle',
+            application_icon=app_icon_name(),
             developer_name='qwersyk',
             version=self.version,
             issue_url='https://github.com/qwersyk/Newelle/issues',
@@ -570,6 +573,7 @@ class MyApp(Adw.Application):
             ]),
             copyright='© 2025 qwersyk',
         )
+        bind_app_icon(about, "application-icon")
         about.add_credit_section(_('Contributors'), [
             'Aritra Saha https://github.com/olumolu',
             'Asaf Niv https://github.com/svc64',
@@ -982,12 +986,18 @@ class MyApp(Adw.Application):
             self.quit()
 
     def quit(self):
+        if os.getenv("NEWELLE_DEBUG_WINDOWING") == "1":
+            print("Requesting application quit", self.get_is_registered(), self.get_is_remote(), file=sys.__stdout__, flush=True)
         Gio.Application.quit(self)
         GLib.MainContext.default().wakeup()
         from .utility.macos_window import wake_for_shutdown
         wake_for_shutdown()
+        if os.getenv("NEWELLE_DEBUG_WINDOWING") == "1":
+            print("Quit request sent", file=sys.__stdout__, flush=True)
     
     def do_shutdown(self):
+        if os.getenv("NEWELLE_DEBUG_WINDOWING") == "1":
+            print("Application shutdown started", file=sys.__stdout__, flush=True)
         from .utility.command_runner import shutdown_command_executions
         from .utility.command_sessions import shutdown_command_sessions
 
@@ -1073,6 +1083,7 @@ def run_headless(interface_key, version):
 
 def create_application(version):
     app = MyApp(application_id="io.github.qwersyk.Newelle.macos", version = version)
+    Gtk.Window.set_default_icon_name(app_icon_name())
     app.create_action('reload_chat', app.reload_chat, [primary_accel("r")])
     app.create_action('reload_folder', app.reload_folder, [primary_accel("e")])
     app.create_action('new_chat', app.new_chat, [primary_accel("n")])

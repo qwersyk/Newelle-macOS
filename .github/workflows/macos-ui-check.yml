@@ -45,11 +45,14 @@ jobs:
       - name: Apply current application code
         run: |
           rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' src/ dist/Newelle.app/Contents/Resources/app/src/
+          rsync -a --delete data/icons/ dist/Newelle.app/Contents/Resources/app/data/icons/
+          rsync -a --delete data/icons/hicolor/ dist/Newelle.app/Contents/Resources/share/icons/hicolor/
+          cp macos/icons/AppIcon.icns dist/Newelle.app/Contents/Resources/Newelle.icns
           cp macos/run_newelle.py macos/smoke_test.py macos/windowing.py dist/Newelle.app/Contents/Resources/app/macos/
           codesign --force --sign - dist/Newelle.app
           codesign --verify --deep --strict dist/Newelle.app
       - name: Check window lifecycle
-        timeout-minutes: 3
+        timeout-minutes: 4
         run: |
           args=(--smoke-test)
           case "$CHECK_MODE" in

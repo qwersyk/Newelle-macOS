@@ -6,13 +6,13 @@ import os
 import subprocess
 import gettext
 from ...utility.system import open_website
+from ...utility.branding import app_logo
 from ..widgets import TipsCarousel, SkillWidget, CompactionMarkerWidget
 from ...utility.strings import markwon_to_pango
 from ...ui.widgets import Message, MultilineEntry, ToolCallsGroupWidget
 from ...utility.message_chunk import get_message_chunks
 
 _ = gettext.gettext
-SCHEMA_ID = "io.github.qwersyk.Newelle"
 
 # Treat "close enough" as the bottom: rows are laid out asynchronously and an
 # exact match is rarely reached while content is still growing.
@@ -748,8 +748,7 @@ class ChatHistory(Gtk.Box):
         ]
         self.empty_chat_placeholder = Gtk.Box(hexpand=True, vexpand=True, orientation=Gtk.Orientation.VERTICAL)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, spacing=20, vexpand=True)    
-        application_logo = Gtk.Image(icon_name=SCHEMA_ID)
-        application_logo.set_pixel_size(128)
+        application_logo = app_logo(128)
         box.append(application_logo)
         title_label = Gtk.Label(label=_("New Chat"), css_classes=["title-1"])
         box.append(title_label)

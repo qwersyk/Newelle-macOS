@@ -8,7 +8,7 @@ import unittest
 from PIL import Image, ImageChops, ImageStat
 
 ROOT = Path(__file__).resolve().parents[1]
-ICON = ROOT / "data/icons/hicolor/scalable/apps/io.github.qwersyk.Newelle.svg"
+ICON = ROOT / "tests/fixtures/asymmetric-corners.svg"
 
 
 class AppIconRenderingTests(unittest.TestCase):
