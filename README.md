@@ -1,5 +1,8 @@
 <h1 align="center">
-  <img src="https://raw.githubusercontent.com/qwersyk/Newelle/master/data/icons/hicolor/scalable/apps/io.github.qwersyk.Newelle.svg" alt="Newelle" width="192" height="192"/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="macos/icons/AppIcon-dark.png">
+    <img src="macos/icons/AppIcon-light.png" alt="Newelle" width="192" height="192"/>
+  </picture>
   <br>
   Newelle - Your Ultimate Virtual Assistant
 </h1>

@@ -16,12 +16,11 @@ APP_ROOT="$RESOURCES_DIR/app"
 SHARE_DIR="$RESOURCES_DIR/share"
 LIB_DIR="$RESOURCES_DIR/lib"
 BIN_DIR="$RESOURCES_DIR/bin"
-ICON_SVG="$ROOT/data/icons/hicolor/scalable/apps/io.github.qwersyk.Newelle.svg"
+ICON_ICNS="$ROOT/macos/icons/AppIcon.icns"
 ICON_NAME="Newelle"
 LAUNCHER_SRC="$ROOT/macos/newelle_launcher.c"
 BREW_PYTHON_BIN="$BREW_PREFIX/bin/python${PYTHON_VERSION}"
 BREW_PYTHON_CONFIG_BIN="$BREW_PREFIX/bin/python${PYTHON_VERSION}-config"
-RSVG_CONVERT_BIN="$BREW_PREFIX/bin/rsvg-convert"
 read -r -a PYTHON_EMBED_CFLAGS <<< "$("$BREW_PYTHON_CONFIG_BIN" --embed --cflags)"
 read -r -a PYTHON_EMBED_LDFLAGS <<< "$("$BREW_PYTHON_CONFIG_BIN" --embed --ldflags)"
 PYTHON_FRAMEWORK_SOURCE="$BREW_PREFIX/opt/python@${PYTHON_VERSION}/Frameworks/Python.framework/Versions/${PYTHON_VERSION}"
@@ -161,19 +160,7 @@ for tool in ffmpeg ffplay ffprobe; do
   fi
 done
 
-ICONSET_PARENT="$(mktemp -d)"
-ICON_PNG="$ICONSET_PARENT/$ICON_NAME.png"
-trap 'rm -rf "$ICONSET_PARENT"' EXIT
-"$RSVG_CONVERT_BIN" -w 1024 -h 1024 "$ICON_SVG" -o "$ICON_PNG"
-ICON_PNG="$ICON_PNG" ICON_ICNS="$RESOURCES_DIR/$ICON_NAME.icns" "$VENV_DIR/bin/python" - <<'PY'
-import os
-from PIL import Image
-
-source = os.environ["ICON_PNG"]
-target = os.environ["ICON_ICNS"]
-image = Image.open(source)
-image.save(target, sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
-PY
+cp "$ICON_ICNS" "$RESOURCES_DIR/$ICON_NAME.icns"
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -187,8 +174,6 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>
   <string>Newelle</string>
   <key>CFBundleIconFile</key>
-  <string>Newelle</string>
-  <key>CFBundleIconName</key>
   <string>Newelle</string>
   <key>CFBundleIdentifier</key>
   <string>io.github.qwersyk.Newelle.macos</string>

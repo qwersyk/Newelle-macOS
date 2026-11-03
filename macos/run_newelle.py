@@ -108,10 +108,15 @@ def configure_macos_activation() -> None:
     if sys.platform != "darwin":
         return
     try:
-        from AppKit import NSApplication, NSApplicationActivationPolicyRegular
+        from AppKit import NSApplication, NSApplicationActivationPolicyRegular, NSImage
 
         app = NSApplication.sharedApplication()
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+        icon_path = os.path.join(CONTENTS_DIR, "Resources", "Newelle.icns")
+        if os.path.isfile(icon_path):
+            icon = NSImage.alloc().initWithContentsOfFile_(icon_path)
+            if icon is not None:
+                app.setApplicationIconImage_(icon)
         app.activateIgnoringOtherApps_(True)
     except Exception as exc:
         if os.getenv("NEWELLE_DEBUG_IMPORTS") == "1":
