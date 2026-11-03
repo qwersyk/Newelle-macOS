@@ -3,6 +3,7 @@ from pydoc import describe
 import shutil
 import os
 import json
+from ..utility.file_dialogs import show_file_dialog
 from ..constants import SETTINGS_GROUPS
 from ..utility.profile_settings import ROOT_PROFILE, get_profile_descendants, get_profile_groups, get_profile_parent
 from gi.repository import Gdk, Gtk, Adw, Gio, GLib
@@ -186,12 +187,12 @@ class ProfileDialog(Adw.PreferencesDialog):
         filter = Gtk.FileFilter(name=_("Newelle Profiles"), patterns=["*.np", "*.json"]) 
         dialog = Gtk.FileDialog(accept_label=_("Export"), title=_("Export Profile"), default_filter=filter)
         dialog.set_initial_name(self.original_name + ".np")
-        dialog.save(self.parent, None, self.export_profile_file)
+        show_file_dialog(dialog, "save", self.parent, self.export_profile_file)
 
     def import_profile(self, button):
         filter = Gtk.FileFilter(name=_("Newelle Profiles"), patterns=["*.np", "*.json"])
         dialog = Gtk.FileDialog(accept_label=_("Import"), title=_("Import Profile"), default_filter=filter)
-        dialog.open(self.parent, None, self.import_profile_file)
+        show_file_dialog(dialog, "open", self.parent, self.import_profile_file)
 
     def import_profile_file(self, dialog, result):
         try:
@@ -297,7 +298,7 @@ class ProfileDialog(Adw.PreferencesDialog):
                                 modal=True,
                                 default_filter=image_filter,
                                 filters=filters)
-        dialog.open(self.parent, None, self.on_file_chosen)
+        show_file_dialog(dialog, "open", self.parent, self.on_file_chosen)
 
     def on_file_chosen(self, dialog, result):
         """Handles the selected file from the file chooser."""

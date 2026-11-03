@@ -22,6 +22,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
 
+from ..utility.file_dialogs import show_file_dialog
 from ..utility.download_manager import (
     DownloadCancelled,
     DownloadKind,
@@ -1853,9 +1854,9 @@ class ConnectApplicationView(Gtk.Box):
                 entry.set_text(selected_file.get_path())
 
         if field_type == "file":
-            dialog.open(self.parent_window, None, selected)
+            show_file_dialog(dialog, "open", self.parent_window, selected)
         else:
-            dialog.select_folder(self.parent_window, None, selected)
+            show_file_dialog(dialog, "select_folder", self.parent_window, selected)
 
     def _collect_values(self):
         values = {}

@@ -62,6 +62,20 @@ def preload_macos_gtk_libraries() -> None:
                 print(f"Failed to preload {library}: {exc}")
 
 
+def configure_macos_file_limit() -> None:
+    if sys.platform != "darwin":
+        return
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    # VTE's macOS fdwalk allocates on the child stack according to this limit.
+    # Some launchers inherit a million descriptors, overflowing the default
+    # 8 MiB stack before exec. Keep a normal app-sized soft limit, preserving
+    # the hard limit for subprocesses that explicitly need to raise it.
+    if soft == resource.RLIM_INFINITY or soft > 4096:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (4096, hard))
+
+
 def configure_macos_process_identity(name: str) -> None:
     if sys.platform != "darwin":
         return
@@ -182,6 +196,7 @@ def launch() -> int:
     bin_dir = os.getenv("NEWELLE_BIN_DIR")
     if bin_dir and os.path.isdir(bin_dir):
         os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+    configure_macos_file_limit()
     configure_macos_process_identity(app_name)
     configure_macos_activation()
     preload_macos_gtk_libraries()

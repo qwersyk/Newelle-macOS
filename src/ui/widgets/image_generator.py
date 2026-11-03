@@ -1,4 +1,5 @@
 from gi.repository import GdkPixbuf, Gtk, Gdk, GLib
+from ...utility.file_dialogs import show_file_dialog
 from ...ui import load_image_with_callback
 import os
 from threading import Thread
@@ -427,7 +428,7 @@ class ImageGeneratorWidget(Gtk.Box):
                 if "dismissed" not in str(e).lower():
                     print(f"Save dialog error: {e}")
 
-        dialog.save(self.get_root(), None, on_save_response)
+        show_file_dialog(dialog, "save", self.get_root(), on_save_response)
 
     def set_prompt(self, prompt):
         """Set the original prompt for this image"""

@@ -4,6 +4,7 @@ import os
 
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 
+from ..utility.file_dialogs import show_file_dialog
 from ..workspaces import DEFAULT_WORKSPACE
 
 _ = gettext.gettext
@@ -175,7 +176,7 @@ class WorkspaceWindow:
                 except (GLib.Error, OSError, TypeError, ValueError):
                     error.set_label(_("This image could not be opened. Choose another image."))
                     error.set_visible(True)
-            chooser.open(self, None, chosen)
+            show_file_dialog(chooser, "open", self, chosen)
         photo.connect("clicked", choose_image)
         refresh()
         return box, avatar, appearance
@@ -493,7 +494,7 @@ class WorkspaceWindow:
                         path.set_text(folder.get_path())
                 except GLib.Error:
                     pass
-            chooser.select_folder(self, None, chosen)
+            show_file_dialog(chooser, "select_folder", self, chosen)
         browse.connect("clicked", choose)
 
         def respond(_dialog, response):

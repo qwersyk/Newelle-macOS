@@ -37,16 +37,10 @@ def activate_macos_application() -> None:
     try:
         from AppKit import NSApplication, NSRunningApplication, NSApplicationActivateIgnoringOtherApps
 
-        app = NSApplication.sharedApplication()
-        for window in app.windows():
-            try:
-                if window.isMiniaturized():
-                    window.deminiaturize_(None)
-                window.makeKeyAndOrderFront_(None)
-                window.orderFrontRegardless()
-            except Exception:
-                pass
-        app.activateIgnoringOtherApps_(True)
+        # Gtk.Window.present() selects the intended window. AppKit also owns
+        # hidden GTK popovers, tooltips and completed file panels; ordering all
+        # NSWindows front resurrects those surfaces without GTK's input grabs.
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         NSRunningApplication.currentApplication().activateWithOptions_(
             NSApplicationActivateIgnoringOtherApps
         )

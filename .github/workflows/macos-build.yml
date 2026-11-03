@@ -54,7 +54,11 @@ jobs:
         run: .venv-macos/bin/python -m unittest discover -s tests -v
 
       - name: Smoke test packaged app
-        run: dist/Newelle.app/Contents/MacOS/Newelle --smoke-test
+        run: |
+          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test
+          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --mini
+          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --close-during-startup
+          dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --direct-quit
         timeout-minutes: 3
 
       - name: Build DMG

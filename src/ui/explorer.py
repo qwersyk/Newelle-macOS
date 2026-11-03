@@ -1,4 +1,5 @@
 from gi.repository import Gtk, Adw, GLib, Gio, Pango, Gdk, GObject
+from ..utility.file_dialogs import show_file_dialog
 from .widgets import File
 import os
 import posixpath
@@ -77,6 +78,7 @@ class ExplorerPanel(Gtk.Box):
         for popover in tuple(self._transient_popovers):
             closed = closed or popover.get_visible()
             popover.popdown()
+            popover.set_visible(False)
         return closed
 
     def go_to_path(self, path): 
@@ -172,7 +174,7 @@ class ExplorerPanel(Gtk.Box):
             except (ValueError, RuntimeError, OSError, KeyError) as error:
                 self.notification_block.add_toast(Adw.Toast(title=str(error)))
 
-        chooser.select_folder(self.get_root(), None, selected)
+        show_file_dialog(chooser, "select_folder", self.get_root(), selected)
 
     def on_search_button_clicked(self, button):
         if self.search_bar.get_search_mode():

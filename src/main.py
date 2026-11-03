@@ -421,9 +421,16 @@ class MyApp(Adw.Application):
 
     def _present_main_window(self) -> MainWindow:
         window = self._ensure_main_window()
+        window._mini_when_ready = False
+        mini = getattr(self, "mini_win", None)
+        if mini is not None and mini.main_window is window:
+            mini.close_for_owner()
+            GLib.idle_add(lambda: window.present() or False, priority=GLib.PRIORITY_DEFAULT)
+        else:
+            window.unminimize()
+            window.present()
         if getattr(window, "mini_mode", False):
             window.leave_mini_mode()
-        window.present()
         if hasattr(window, "stabilize_initial_layout"):
             GLib.idle_add(window.stabilize_initial_layout)
         GLib.idle_add(activate_macos_application)
@@ -467,6 +474,24 @@ class MyApp(Adw.Application):
             self.main_windows.remove(window)
         if getattr(self, "_last_main_window", None) is window:
             self._last_main_window = self.main_windows[-1] if self.main_windows else None
+        if not self.main_windows:
+            GLib.idle_add(self._quit_if_no_main_windows, priority=GLib.PRIORITY_DEFAULT)
+
+    def _quit_if_no_main_windows(self):
+        if not self.main_windows:
+            # Preferences, downloads and other utility windows must not keep a
+            # headless application alive after the final chat window closes.
+            self._destroy_application_windows()
+            self.quit()
+        return GLib.SOURCE_REMOVE
+
+    def _destroy_application_windows(self):
+        from .utility.file_dialogs import cancel_file_dialog
+        for window in list(self.get_windows()):
+            cancel_file_dialog(window)
+            if hasattr(window, "_detach_terminal"):
+                window._detach_terminal()
+            window.destroy()
 
     def workspace_window(self, workspace_id, exclude=None):
         return next((window for window in self.main_windows
@@ -621,14 +646,27 @@ class MyApp(Adw.Application):
     
     def close_window(self, window, *a):
         if not getattr(window, "ui_built", False):
-            # UI construction is queued on the main loop. Do not destroy a
-            # window while that callback is still waiting to initialize it.
+            if not getattr(window, "_close_when_ready", False):
+                window._close_when_ready = True
+                window.connect("ui-built", lambda *_: GLib.idle_add(lambda: window.close() or False))
             return True
-        if getattr(self, "mini_win", None) is not None and self.mini_win.main_window is window and self.mini_win.get_visible():
-            self.mini_win.close()
+        if getattr(window, "_closing", False):
+            return False
+        mini = getattr(self, "mini_win", None)
+        if mini is not None and mini.main_window is window:
+            from .utility.file_dialogs import cancel_file_dialog
+            cancel_file_dialog(mini)
+            mini.close_transient_ui()
+        else:
+            mini = None
         if getattr(self, "voice_win", None) is not None and (self.voice_win.main_window is window or self.voice_win.controller is window.controller):
             self.voice_win.cancel()
         window.close_transient_ui()
+        from .utility.file_dialogs import cancel_file_dialog
+        cancel_file_dialog(window)
+        if getattr(window, "_close_dialog", None) is not None:
+            window._close_dialog.present()
+            return True
         window.save_main_window_geometry(mapped_only=True)
         window.save_workspace_tabs()
         window.remember_workspace_drafts()
@@ -659,7 +697,7 @@ class MyApp(Adw.Application):
                 heading = _("Terminal commands are still running in the background")
                 body = _("When you close the window, they will be automatically terminated")
             dialog = Adw.MessageDialog(
-                transient_for=window,
+                transient_for=mini or window,
                 heading=heading,
                 body=body,
                 body_use_markup=True,
@@ -670,10 +708,17 @@ class MyApp(Adw.Application):
             dialog.set_default_response("cancel")
             dialog.set_close_response("cancel")
             dialog.connect("response", self.close_message, window)
+            window._close_dialog = dialog
             dialog.present()
             return True
     
     def _close_main_window(self, window):
+        if getattr(window, "_closing", False):
+            return
+        window._closing = True
+        mini = getattr(self, "mini_win", None)
+        if mini is not None and mini.main_window is window:
+            mini.close_for_owner()
         window.close_transient_ui()
         window.save_main_window_geometry(mapped_only=True)
         window.save_workspace_tabs()
@@ -706,9 +751,14 @@ class MyApp(Adw.Application):
         self.settings.set_string("current-profile", window.settings.get_string("current-profile"))
         window.controller.save_chats()
         window.controller.close_application()
+        from .ui.widgets.terminal_dialog import Terminal
+        for widget in window._iter_widget_tree(window):
+            if isinstance(widget, Terminal) and hasattr(widget, "detach"):
+                widget.detach()
         self._main_window_destroyed(window)
 
     def close_message(self,a,status,window):
+        window._close_dialog = None
         if status=="close":
             for i in window.streams:
                 if i.poll() is None:
@@ -746,22 +796,19 @@ class MyApp(Adw.Application):
 
     def on_activate(self, app):
         voice_requested = getattr(self, "start_in_voice", False)
+        mini_requested = getattr(self, "start_in_mini", False) or self.settings.get_string("startup-mode") == "mini"
         if self.win is None:
-            self.create_main_window(suppress_presentation=voice_requested)
+            self.create_main_window(suppress_presentation=voice_requested or mini_requested)
 
         if voice_requested:
             self.start_in_voice = False
             self.start_in_mini = False
             self._queue_voice_mode()
-        elif getattr(self, "start_in_mini", False) or self.settings.get_string("startup-mode") == "mini":
+        elif mini_requested:
             self.settings.set_string("startup-mode", "normal")
             # --mini is per-invocation: a later plain `newelle` must present the main window
             self.start_in_mini = False
-            if getattr(self.win, "ui_built", False):
-                self.show_mini_window()
-                self.win.hide()
-            else:
-                self.win.connect("ui-built", self.show_mini_window)
+            self.show_mini_window()
         else:
             if getattr(self, "voice_win", None) is not None:
                 self.voice_win.cancel()
@@ -810,24 +857,37 @@ class MyApp(Adw.Application):
             return
         self._queue_voice_mode()
 
-    def show_mini_window(self, *args):
-        """Open the mini window hosting the chat panel of the main window"""
-        if getattr(self, "mini_win", None) is not None and self.mini_win.get_visible():
-            self.mini_win.close()
-        self.mini_win = MiniWindow(application=self, main_window=self.win)
+    def show_mini_window(self, *args, window=None):
+        """Host the current chat panel once, including during cold startup."""
+        window = window or self._ensure_main_window()
+        if not getattr(window, "ui_built", False):
+            if not getattr(window, "_mini_when_ready", False):
+                window._mini_when_ready = True
+                def ready(*_args):
+                    if not window._mini_when_ready:
+                        return
+                    window._mini_when_ready = False
+                    if not getattr(window, "_close_when_ready", False):
+                        self.show_mini_window(window=window)
+                window.connect("ui-built", ready)
+            return
+        mini = getattr(self, "mini_win", None)
+        if mini is not None:
+            if mini.main_window is window:
+                mini.present()
+                return
+            mini.close()
+        self.mini_win = MiniWindow(application=self, main_window=window)
+        window.hide()
         self.mini_win.present()
         GLib.idle_add(activate_macos_application)
 
     def toggle_mini_window(self, *a):
         """Switch between the mini window and the full window"""
-        if getattr(self, "mini_win", None) is not None and self.mini_win.is_active():
-            # From the mini window: give the panel back and show the full window
+        if getattr(self, "mini_win", None) is not None:
             self.mini_win.close()
-            self.win.present()
         else:
-            # From the full window: host the chat panel in the mini window instead
             self.show_mini_window()
-            self.win.hide()
 
     def focus_message(self, *a):
         self._present_main_window()
@@ -909,17 +969,17 @@ class MyApp(Adw.Application):
         shutdown_command_executions()
         shutdown_command_sessions()
         ready_windows = [window for window in self.main_windows if getattr(window, "ui_built", False)]
-        if not ready_windows:
-            Gtk.Application.do_shutdown(self)
-            return
-        active = self.win if self.win in ready_windows else ready_windows[-1]
-        active.save_chat()
-        settings = Gio.Settings.new('io.github.qwersyk.Newelle')
-        settings.set_int("chat", active.chat_id)
+        active = self.win if self.win in ready_windows else (ready_windows[-1] if ready_windows else None)
         for window in ready_windows:
-            window.save_workspace_tabs()
             window.stream_number_variable += 1
-            window.controller.close_application()
+            self._close_main_window(window)
+        if active is not None:
+            self.settings.set_int("chat", active.chat_id)
+        voice = getattr(self, "voice_win", None)
+        if voice is not None:
+            voice.cancel()
+        # Native application termination can bypass close-request entirely.
+        self._destroy_application_windows()
         Gtk.Application.do_shutdown(self)
 
     def zoom(self, *a):

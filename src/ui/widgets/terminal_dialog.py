@@ -1,6 +1,8 @@
 import gi
+import os
+import signal
 from gettext import gettext as _
-from gi.repository import Gtk, Adw, GLib, Pango, Gdk
+from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk
 
 from gi.repository.GObject import GObject
 from .runtime import VTE_AVAILABLE
@@ -12,39 +14,83 @@ if VTE_AVAILABLE:
 
 if VTE_AVAILABLE:
     class Terminal(Vte.Terminal):
-        def __init__(self, script:list):
+        def __init__(self, script: list):
             super().__init__(css_classes=["terminal"])
+            self._detached = False
+            self._spawn_done = False
+            self.child_pid = None
+            self.exit_code = None
+            self.spawn_error = None
+            self._spawn_cancel = Gio.Cancellable()
             self.set_font(Pango.FontDescription.from_string("Monospace 12"))
             self.set_clear_background(False)
+            self.set_scrollback_lines(10000)
             pty = Vte.Pty.new_sync(Vte.PtyFlags.DEFAULT, None)
             self.set_pty(pty)
+            self.connect("child-exited", self._on_child_exited)
+            self.connect("unrealize", self._on_unrealize)
             pty.spawn_async(
-                GLib.get_current_dir(),
-                script,
-                None,
-                GLib.SpawnFlags.DEFAULT,
-                None,
-                None,
-                -1,
-                None,
-                None,
-                None
+                GLib.get_current_dir(), script, None, GLib.SpawnFlags.DEFAULT,
+                None, None, -1, self._spawn_cancel, self._on_spawned, None,
             )
-            key_controller = Gtk.EventControllerKey()
-            key_controller.connect("key-pressed", self.on_key_press)
-            self.add_controller(key_controller)
+            keys = Gtk.EventControllerKey()
+            keys.connect("key-pressed", self.on_key_press)
+            self.add_controller(keys)
+
+        @property
+        def is_running(self):
+            return not self._spawn_done or (self.child_pid is not None and self.exit_code is None)
+
+        def _on_spawned(self, pty, result, *_args):
+            self._spawn_done = True
+            try:
+                _success, pid = pty.spawn_finish(result)
+            except GLib.Error as error:
+                self.spawn_error = str(error)
+                if not self._detached:
+                    self.feed((self.spawn_error + "\r\n").encode("utf-8"))
+                return
+            self.child_pid = pid
+            # Without watch_child VTE never reaps the shell or emits child-exited.
+            self.watch_child(pid)
+            if self._detached:
+                self._terminate_child()
+
+        def _on_child_exited(self, _terminal, status):
+            self.exit_code = os.waitstatus_to_exitcode(status)
+
+        def _on_unrealize(self, *_args):
+            GLib.idle_add(self._detach_if_unrooted, priority=GLib.PRIORITY_DEFAULT)
+
+        def _detach_if_unrooted(self):
+            if self.get_root() is None:
+                self.detach()
+            return GLib.SOURCE_REMOVE
+
+        def _terminate_child(self):
+            if self.child_pid is not None and self.exit_code is None:
+                try:
+                    os.killpg(self.child_pid, signal.SIGHUP)
+                except ProcessLookupError:
+                    pass
+
+        def detach(self):
+            if not self._detached:
+                self._detached = True
+                self._spawn_cancel.cancel()
+                self._terminate_child()
 
         def on_key_press(self, controller, keyval, keycode, state):
-            if has_primary_modifier(state) and keyval == Gdk.KEY_c:
+            if has_primary_modifier(state) and Gdk.keyval_to_lower(keyval) == Gdk.KEY_c:
                 self.copy_clipboard()
                 return True
-            elif has_primary_modifier(state) and keyval == Gdk.KEY_v:
+            if has_primary_modifier(state) and Gdk.keyval_to_lower(keyval) == Gdk.KEY_v:
                 self.paste_clipboard()
                 return True
             return False
+
         def get_output(self):
-            txt = self.get_text_format(Vte.Format.TEXT)
-            return txt 
+            return self.get_text_format(Vte.Format.TEXT)
 
     class SessionTerminal(Vte.Terminal):
         """Interactive VTE view backed by an existing command session."""
@@ -91,10 +137,11 @@ if VTE_AVAILABLE:
         def _on_key_press(self, _controller, keyval, _keycode, state):
             ctrl = state & Gdk.ModifierType.CONTROL_MASK
             shift = state & Gdk.ModifierType.SHIFT_MASK
-            if ctrl and shift and keyval == Gdk.KEY_C:
+            shortcut = has_primary_modifier(state) or (ctrl and shift)
+            if shortcut and Gdk.keyval_to_lower(keyval) == Gdk.KEY_c:
                 self.copy_clipboard()
                 return True
-            if ctrl and shift and keyval == Gdk.KEY_V:
+            if shortcut and Gdk.keyval_to_lower(keyval) == Gdk.KEY_v:
                 self.paste_clipboard()
                 return True
             return False

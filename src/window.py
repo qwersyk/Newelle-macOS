@@ -14,6 +14,7 @@ import gettext
 import datetime
 from gi.repository import Gtk, Adw, Pango, Gio, Gdk, GObject, GLib, GdkPixbuf
 
+from .utility.file_dialogs import show_file_dialog
 from .ui.settings import Settings
 
 from .ui.profile import ProfileDialog, TransferSettingsDialog
@@ -464,6 +465,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
             self.stdout_monitor_dialog.stop_monitoring_external()
 
     def _install_transient_cleanup_handlers(self):
+        self.connect("unmap", lambda *_: self.close_transient_ui())
         click_controller = Gtk.GestureClick()
         click_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         click_controller.connect("pressed", self._on_window_capture_click)
@@ -489,7 +491,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
 
     def _is_transient_trigger(self, widget) -> bool:
         while widget is not None:
-            if isinstance(widget, (Gtk.MenuButton, Gtk.DropDown, Adw.HeaderBar, Gtk.HeaderBar, Gtk.WindowHandle)):
+            if isinstance(widget, (Gtk.MenuButton, Gtk.DropDown, Gtk.Popover)):
                 return True
             widget = widget.get_parent()
         return False
@@ -845,13 +847,19 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
             if popover is not None:
                 closed = closed or popover.get_visible()
                 popover.popdown()
+                popover.set_visible(False)
 
         for widget in self._iter_widget_tree(self):
+            if isinstance(widget, Gtk.Popover):
+                closed = widget.get_visible() or closed
+                widget.popdown()
+                widget.set_visible(False)
             if isinstance(widget, Gtk.MenuButton):
                 popover = widget.get_popover()
                 if popover is not None:
                     closed = closed or popover.get_visible()
                     popover.popdown()
+                    popover.set_visible(False)
 
         for tab_view_name in ("chat_tabs", "canvas_tabs"):
             tab_view = getattr(self, tab_view_name, None)
@@ -1381,11 +1389,6 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
         models = sorted(models, key=lambda x: (x[1] not in favorites, x[0].lower()))
 
         for name, model in models:
-            # Create a ListBoxRow to hold our action row.
-            listbox_row = Gtk.ListBoxRow()
-            listbox_row.get_style_context().add_class("card")
-            listbox_row.set_margin_bottom(5)
-
             # Create an ActionRow with a title and subtitle.
             # The title shows provider and display; the subtitle shows a per-model description.
             # Retrieve a model-specific subtitle (for example, using a model library if available).
@@ -1396,8 +1399,12 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
                         model_subtitle = info_dict["description"]
                         break
             action_row = Adw.ActionRow(
-                title=f"{provider_title} - {name}", subtitle=model_subtitle
+                title=f"{provider_title} - {name}", subtitle=model_subtitle,
+                activatable=True,
             )
+            listbox_row = action_row
+            listbox_row.add_css_class("card")
+            listbox_row.set_margin_bottom(5)
             
             # Star button
             is_fav = model in favorites
@@ -1409,20 +1416,18 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
             btn.connect("clicked", self.on_star_clicked, model)
             action_row.add_suffix(btn)
 
-            listbox_row.set_child(action_row)
-
             # Save attributes for selection handling and searching.
             listbox_row.model = model
             listbox_row.search_terms = (
                 f"{provider_title} {name} {model_subtitle}".lower()
             )  # Store searchable text
 
-            # Select the correct row on init
+            self.models_list.append(listbox_row)
+            # A row must belong to the list before it can be selected.
             if self.model.get_selected_model() == model:
                 self.models_list.select_row(listbox_row)
 
             self.models_list.get_style_context().add_class("transparent")
-            self.models_list.append(listbox_row)
 
         # Add the listbox to a scrolled window for better handling if list is long
         list_scroll = Gtk.ScrolledWindow(
@@ -2379,7 +2384,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
             default_filter=default_filter,
             filters=filters,
         )
-        dialog.open(self, None, self.process_file)
+        show_file_dialog(dialog, "open", self, self.process_file)
 
     def process_file(self, dialog, result):
         """Get the attached file by the dialog
@@ -3513,6 +3518,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
         tab = self.canvas_tabs.append(box)
         tab.set_title("Terminal")
         tab.set_icon(Gio.ThemedIcon(name="gnome-terminal-symbolic"))
+        self.canvas_tabs.set_selected_page(tab)
         self.show_sidebar()
         return tab
 
@@ -3743,7 +3749,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
         )
         dialog.set_initial_name(default_filename)
 
-        dialog.save(self, None, self._export_chat_finish, export_data)
+        show_file_dialog(dialog, "save", self, self._export_chat_finish, export_data)
 
     def _export_chat_finish(self, dialog, result, export_data):
         """Finish the export operation after file selection
@@ -3781,7 +3787,7 @@ class MainWindow(WorkspaceWindow, Adw.ApplicationWindow):
             modal=True
         )
 
-        dialog.open(self, None, self._import_chat_finish)
+        show_file_dialog(dialog, "open", self, self._import_chat_finish)
 
     def _import_chat_finish(self, dialog, result):
         """Finish the import operation after file selection

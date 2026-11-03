@@ -11,6 +11,7 @@ import re
 
 from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk, GtkSource
 
+from ..utility.file_dialogs import show_file_dialog
 from ..utility.util import PerformanceMonitor
 
 from ..handlers import Handler
@@ -1692,7 +1693,7 @@ class Settings(Adw.Window):
 
     def _on_add_file_permission_clicked(self, button):
         dialog = Gtk.FileDialog(title=_("Select Directory"))
-        dialog.select_folder(self, None, self._on_file_permission_folder_selected)
+        show_file_dialog(dialog, "select_folder", self, self._on_file_permission_folder_selected)
 
     def _on_file_permission_folder_selected(self, dialog, result):
         try:
@@ -1978,7 +1979,7 @@ class Settings(Adw.Window):
 
     def _on_add_path_security_clicked(self, button):
         dialog = Gtk.FileDialog(title=_("Select Directory"))
-        dialog.select_folder(self, None, self._on_path_security_folder_selected)
+        show_file_dialog(dialog, "select_folder", self, self._on_path_security_folder_selected)
 
     def _on_path_security_folder_selected(self, dialog, result):
         try:
@@ -2328,7 +2329,7 @@ class Settings(Adw.Window):
 
     def _on_add_skill_clicked(self, button):
         dialog = Gtk.FileDialog(title=_("Select Skill Folder"))
-        dialog.select_folder(self, None, self._on_skill_folder_selected)
+        show_file_dialog(dialog, "select_folder", self, self._on_skill_folder_selected)
 
     def _on_skill_folder_selected(self, dialog, result):
         try:

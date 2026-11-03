@@ -770,12 +770,17 @@ class ChatTab(Gtk.Box):
     def close_transient_ui(self) -> bool:
         """Close popovers owned by this chat tab before the parent window hides."""
         closed = False
-        if hasattr(self, "_cmd_popover") and self._cmd_popover is not None:
-            closed = closed or self._cmd_popover.get_visible()
-            self._cmd_popover.popdown()
-        if hasattr(self, "quick_toggles_popover") and self.quick_toggles_popover is not None:
-            closed = closed or self.quick_toggles_popover.get_visible()
-            self.quick_toggles_popover.popdown()
+        def dismiss(widget):
+            nonlocal closed
+            if isinstance(widget, Gtk.Popover):
+                closed = widget.get_visible() or closed
+                widget.popdown()
+                widget.set_visible(False)
+            child = widget.get_first_child()
+            while child is not None:
+                dismiss(child)
+                child = child.get_next_sibling()
+        dismiss(self)
         return closed
     def _build_thinking_control(self):
         """Build the thinking-effort MenuButton (hidden unless the model opts in).

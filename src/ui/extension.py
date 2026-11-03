@@ -4,6 +4,7 @@ from threading import Thread
 
 from gi.repository import Adw, Gdk, GLib, Gtk
 
+from ..utility.file_dialogs import show_file_dialog
 from ..controller import NewelleController
 from ..utility.system import can_escape_sandbox, get_spawn_command
 from .extensions_catalog import ExtensionMarketplaceView, install_extension_files
@@ -341,7 +342,7 @@ class ExtensionPage(Adw.PreferencesPage):
             modal=True,
             default_filter=file_filter,
         )
-        dialog.open(self._parent_window(), None, self.process_folder)
+        show_file_dialog(dialog, "open", self._parent_window(), self.process_folder)
 
     def process_folder(self, dialog, result):
         try:

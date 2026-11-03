@@ -1,86 +1,94 @@
 import gettext
 
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Adw, Gtk, Gdk, GLib
 
+from ..utility.file_dialogs import cancel_file_dialog
+from ..utility.macos_window import float_mini_window
 from ..utility.system import has_primary_modifier
 
 _ = gettext.gettext
 
 
-class MiniWindow(Gtk.Window):
-    """Compact window that temporarily hosts the main chat panel."""
+class MiniWindow(Adw.Window):
+    """Floating, resizable chat window with a single, reversible owner."""
 
     def __init__(self, application, main_window, **kwargs):
         super().__init__(application=application, **kwargs)
         self.main_window = main_window
+        self._restore_main = True
         self.set_title(_("Newelle Mini Window"))
         self.set_default_size(540, 520)
-        self.set_decorated(False)
-        self.set_resizable(False)
-        self.add_css_class("mini-window")
+        self.set_size_request(360, 320)
 
-        # WindowHandle so the undecorated window can be dragged around
-        self.handle = Gtk.WindowHandle()
-        self.set_child(self.handle)
-
+        toolbar = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_title_widget(Gtk.Label(label=_("Newelle")))
+        expand = Gtk.Button(icon_name="view-restore-symbolic", tooltip_text=_("Open main window"))
+        expand.connect("clicked", lambda *_: self.close())
+        header.pack_end(expand)
+        toolbar.add_top_bar(header)
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.handle.set_child(self.main_box)
+        toolbar.set_content(self.main_box)
+        self.set_content(toolbar)
 
-        # Shown in the main window while the chat panel is hosted here
-        self.placeholder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.placeholder.set_valign(Gtk.Align.CENTER)
-        self.placeholder.set_halign(Gtk.Align.CENTER)
-        self.placeholder.set_vexpand(True)
-        placeholder_label = Gtk.Label(label=_("Chat is opened in mini window"))
-        placeholder_label.add_css_class("dim-label")
-        self.placeholder.append(placeholder_label)
-
-        self.chat_panel = None
-        self.original_parent = None
-        self._attach_chat_panel()
-
-        key_controller = Gtk.EventControllerKey()
-        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        key_controller.connect("key-pressed", self._on_key_pressed)
-        self.add_controller(key_controller)
-        self.connect('close-request', self._on_close_request)
-
-    def _attach_chat_panel(self):
-        self.chat_panel = self.main_window.secondary_message_chat_block
-        parent = self.chat_panel.get_parent()
-        if parent is not None:
-            self.original_parent = parent
-            self.chat_panel.unparent()
-            self.original_parent.append(self.placeholder)
+        self.chat_panel = main_window.secondary_message_chat_block
+        self.original_parent = self.chat_panel.get_parent()
+        main_window.close_transient_ui()
+        self.original_parent.remove(self.chat_panel)
         self.main_box.append(self.chat_panel)
-        # The mini window always uses the compact input bar, whatever the setting
-        self.main_window._apply_compact_input_bar(True)
-        # Reparenting and the compact layout rebuild steal focus; put it back
-        # on the input once the window is mapped.
+        main_window._apply_compact_input_bar(True)
+
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(keys)
+        self.connect("close-request", self._on_close_request)
+        self.connect("map", self._on_map)
+        self.connect("unmap", lambda *_: self.close_transient_ui())
+
+    def _on_map(self, *_args):
+        float_mini_window(self)
         GLib.idle_add(self.main_window.focus_input)
+
+    def close_transient_ui(self):
+        return self.main_window.close_transient_ui()
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
         if keyval == Gdk.KEY_Escape:
-            self.close()
+            if not self.close_transient_ui():
+                self.close()
             return True
         if has_primary_modifier(state) and Gdk.keyval_to_lower(keyval) == Gdk.KEY_w:
             self.close()
             return True
         return False
-    def _on_close_request(self, *args):
-        if self.chat_panel is not None:
-            if self.chat_panel.get_parent() is not None:
-                self.chat_panel.unparent()
 
-            if self.placeholder.get_parent() is not None:
-                self.placeholder.unparent()
+    def close_for_owner(self):
+        """Return the panel during quit without reopening the main window."""
+        self._restore_main = False
+        self.close()
 
-            if self.original_parent is not None:
-                self.original_parent.append(self.chat_panel)
-
-            self.chat_panel = None
-            self.original_parent = None
-            # Give each tab back the layout chosen in the settings
-            self.main_window._refresh_compact_input_bar()
-
+    def _on_close_request(self, *_args):
+        if self.chat_panel is None:
+            return False
+        cancel_file_dialog(self)
+        self.close_transient_ui()
+        self.main_box.remove(self.chat_panel)
+        self.original_parent.append(self.chat_panel)
+        self.chat_panel = None
+        app = self.get_application()
+        if getattr(app, "mini_win", None) is self:
+            app.mini_win = None
+        self.main_window._refresh_compact_input_bar()
+        if self._restore_main and not getattr(self.main_window, "_closing", False):
+            # Complete the mini surface's close before mapping the restored
+            # main surface; AppKit can still be delivering its last frame.
+            GLib.idle_add(self._present_main, priority=GLib.PRIORITY_DEFAULT)
         return False
+
+    def _present_main(self):
+        if not getattr(self.main_window, "_closing", False):
+            self.main_window.unminimize()
+            self.main_window.present()
+            self.main_window.focus_input()
+        return GLib.SOURCE_REMOVE

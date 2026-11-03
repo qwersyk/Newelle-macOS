@@ -197,6 +197,35 @@ class WindowDragTests(unittest.TestCase):
         self.assertEqual(self.module.drag_origin((-1000, 200), (-900, 600), (-800, 650)), (-900, 250))
 
 
+class ProcessLimitTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("macos_launcher_tests", ROOT / "macos/run_newelle.py")
+        cls.launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.launcher)
+
+    def test_large_inherited_file_limit_is_bounded_without_changing_hard_limit(self):
+        import resource
+        with patch.object(resource, "getrlimit", return_value=(1048575, resource.RLIM_INFINITY)), \
+             patch.object(resource, "setrlimit") as set_limit:
+            self.launcher.configure_macos_file_limit()
+        set_limit.assert_called_once_with(resource.RLIMIT_NOFILE, (4096, resource.RLIM_INFINITY))
+
+    def test_normal_file_limit_is_preserved(self):
+        import resource
+        with patch.object(resource, "getrlimit", return_value=(1024, 8192)), \
+             patch.object(resource, "setrlimit") as set_limit:
+            self.launcher.configure_macos_file_limit()
+        set_limit.assert_not_called()
+
+    def test_unlimited_soft_limit_is_bounded(self):
+        import resource
+        with patch.object(resource, "getrlimit", return_value=(resource.RLIM_INFINITY, resource.RLIM_INFINITY)), \
+             patch.object(resource, "setrlimit") as set_limit:
+            self.launcher.configure_macos_file_limit()
+        set_limit.assert_called_once_with(resource.RLIMIT_NOFILE, (4096, resource.RLIM_INFINITY))
+
+
 class RuntimeTests(unittest.TestCase):
     def test_pip_uses_bundled_interpreter(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"NEWELLE_PYTHON_BIN": "/bundled/python"}), \
@@ -230,6 +259,65 @@ class RuntimeTests(unittest.TestCase):
                 selected = handler._populate_prebuilt_list.call_args.args[0]
                 self.assertEqual([a["name"] for a in selected], ["llama-bin-macos-arm64.tar.gz"])
                 self.assertEqual(get.call_count, 1)
+
+class ActivationTests(unittest.TestCase):
+    def test_activation_never_reopens_hidden_native_windows(self):
+        from newelle.utility.system import activate_macos_application
+        import AppKit
+        application = Mock()
+        with patch.object(AppKit, 'NSApplication', Mock(sharedApplication=Mock(return_value=application))), \
+             patch.object(AppKit, 'NSRunningApplication', Mock()):
+            activate_macos_application()
+        application.activateIgnoringOtherApps_.assert_called_once_with(True)
+        application.windows.assert_not_called()
+
+
+class FileDialogTests(unittest.TestCase):
+    def setUp(self):
+        from gi.repository import Gtk
+        self.parent = Mock(spec=Gtk.Window)
+        self.parent.get_mapped.return_value = True
+        self.parent._newelle_file_dialog = None
+        self.parent.connect.side_effect = [1, 2]
+        self.dialog = Mock()
+        self.callback = Mock()
+
+    def test_one_panel_per_owner_and_release_on_completion(self):
+        from newelle.utility.file_dialogs import show_file_dialog
+        cancellable = show_file_dialog(self.dialog, 'open', self.parent, self.callback, 'data')
+        duplicate = Mock()
+        self.assertIs(show_file_dialog(duplicate, 'open', self.parent, self.callback), cancellable)
+        duplicate.open.assert_not_called()
+        finish = self.dialog.open.call_args.args[2]
+        result = Mock()
+        finish(self.dialog, result)
+        self.callback.assert_called_once_with(self.dialog, result, 'data')
+        self.assertIsNone(self.parent._newelle_file_dialog)
+        self.assertEqual(self.parent.disconnect.call_count, 2)
+
+    def test_hiding_owner_cancels_panel(self):
+        from newelle.utility.file_dialogs import show_file_dialog
+        cancellable = show_file_dialog(self.dialog, 'open', self.parent, self.callback)
+        self.parent.connect.call_args_list[0].args[1]()
+        self.assertTrue(cancellable.is_cancelled())
+
+    def test_hidden_main_uses_visible_mini_as_parent(self):
+        from newelle.utility.file_dialogs import show_file_dialog
+        self.parent.get_mapped.return_value = False
+        mini = Mock()
+        mini.main_window = self.parent
+        mini._newelle_file_dialog = None
+        self.parent.get_application.return_value.mini_win = mini
+        show_file_dialog(self.dialog, 'open', self.parent, self.callback)
+        self.assertIs(self.dialog.open.call_args.args[0], mini)
+
+    def test_failed_open_releases_owner(self):
+        from newelle.utility.file_dialogs import show_file_dialog
+        self.dialog.open.side_effect = RuntimeError('failed')
+        with self.assertRaises(RuntimeError):
+            show_file_dialog(self.dialog, 'open', self.parent, self.callback)
+        self.assertIsNone(self.parent._newelle_file_dialog)
+        self.assertEqual(self.parent.disconnect.call_count, 2)
 
 
 if __name__ == "__main__":
