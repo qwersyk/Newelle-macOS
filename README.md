@@ -76,8 +76,8 @@ Build from source on macOS:
 
 ## macOS build and checks
 
-This fork includes upstream Newelle 1.6.0 and subsequent fixes through
-[`d6ed29b`](https://github.com/qwersyk/Newelle/commit/d6ed29b), while keeping the
+This fork includes upstream Newelle 1.6.1 and subsequent fixes through
+[`17639d9`](https://github.com/qwersyk/Newelle/commit/17639d9), while keeping the
 native macOS launcher, Command shortcuts, browser, terminal, and DMG packaging.
 
 On an Apple Silicon Mac, install the build dependencies with Homebrew:
@@ -88,7 +88,7 @@ brew install python@3.13 gtk4 libadwaita gtksourceview5 pygobject3 \
 /usr/bin/env bash macos/build_newelle_dmg.sh
 ```
 
-The installer is written to `dist/Newelle-1.6.0-macos-arm64.dmg`. The app includes
+The installer is written to `dist/Newelle-1.6.1-macos-arm64.dmg`. The app includes
 its Python and native dependencies, so Homebrew is only required for building.
 Builds are ad-hoc signed and are not notarized.
 
