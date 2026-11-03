@@ -28,6 +28,29 @@ from newelle.utility import screenshot
 from newelle.utility import pip as pip_helper
 
 
+class ModeToolSchemaTests(unittest.TestCase):
+    def test_mode_tool_created_before_controller_is_ready_stays_valid(self):
+        from newelle.integrations.agent_tools import AgentToolsIntegration
+        integration = AgentToolsIntegration(None, None, Mock())
+        tool = next(tool for tool in integration.get_tools() if tool.name == "switch_mode")
+        self.assertNotIn("enum", tool.schema["properties"]["mode"])
+        controller = Mock()
+        controller.mode_manager.get_modes.return_value = {"Normal": {}, "Plan": {}}
+        integration.runtime_controller = controller
+        self.assertEqual(tool.schema["properties"]["mode"]["enum"], ["Normal", "Plan"])
+
+    def test_mode_tool_schema_tracks_later_mode_changes(self):
+        from newelle.integrations.agent_tools import AgentToolsIntegration
+        integration = AgentToolsIntegration(None, None, Mock())
+        controller = Mock()
+        controller.mode_manager.get_modes.return_value = {"Normal": {}}
+        integration.runtime_controller = controller
+        tool = next(tool for tool in integration.get_tools() if tool.name == "switch_mode")
+        self.assertEqual(tool.schema["properties"]["mode"]["enum"], ["Normal"])
+        controller.mode_manager.get_modes.return_value = {"Normal": {}, "Custom": {}}
+        self.assertEqual(tool.schema["properties"]["mode"]["enum"], ["Normal", "Custom"])
+
+
 class AudioRecordingTests(unittest.TestCase):
     def test_device_fallback_and_native_sample_rate(self):
         recorder = AudioRecorder()
