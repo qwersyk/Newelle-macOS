@@ -21,6 +21,18 @@ CONTENTS_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 DEFAULT_FRAMEWORKS_DIR = os.path.join(CONTENTS_DIR, "Frameworks")
 
 
+def configure_macos_rendering() -> None:
+    if sys.platform != "darwin" or os.getenv("NEWELLE_FULL_REDRAW") == "0":
+        return
+    # The macOS surface can lose unchanged pixels during dialog transitions
+    # and resizing. Render the complete scene on each requested frame instead
+    # of relying on preserved pixels outside the damage region. Keep hardware
+    # acceleration and let GTK request frames normally; do not add a timer.
+    options = os.environ.get("GSK_DEBUG", "")
+    if "full-redraw" not in re.split(r"[:,;\s]+", options):
+        os.environ["GSK_DEBUG"] = options + ("," if options else "") + "full-redraw"
+
+
 def preload_macos_gtk_libraries() -> None:
     if sys.platform != "darwin":
         return
@@ -202,6 +214,7 @@ def launch() -> int:
     if bin_dir and os.path.isdir(bin_dir):
         os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
     configure_macos_file_limit()
+    configure_macos_rendering()
     configure_macos_process_identity(app_name)
     configure_macos_activation()
     preload_macos_gtk_libraries()
