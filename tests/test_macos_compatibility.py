@@ -28,6 +28,55 @@ from newelle.utility import screenshot
 from newelle.utility import pip as pip_helper
 
 
+class ModeToolSchemaTests(unittest.TestCase):
+    def test_mode_tool_created_before_controller_is_ready_stays_valid(self):
+        from newelle.integrations.agent_tools import AgentToolsIntegration
+        integration = AgentToolsIntegration(None, None, Mock())
+        tool = next(tool for tool in integration.get_tools() if tool.name == "switch_mode")
+        self.assertNotIn("enum", tool.schema["properties"]["mode"])
+        controller = Mock()
+        controller.mode_manager.get_modes.return_value = {"Normal": {}, "Plan": {}}
+        integration.runtime_controller = controller
+        self.assertEqual(tool.schema["properties"]["mode"]["enum"], ["Normal", "Plan"])
+
+    def test_mode_tool_schema_tracks_later_mode_changes(self):
+        from newelle.integrations.agent_tools import AgentToolsIntegration
+        integration = AgentToolsIntegration(None, None, Mock())
+        controller = Mock()
+        controller.mode_manager.get_modes.return_value = {"Normal": {}}
+        integration.runtime_controller = controller
+        tool = next(tool for tool in integration.get_tools() if tool.name == "switch_mode")
+        self.assertEqual(tool.schema["properties"]["mode"]["enum"], ["Normal"])
+        controller.mode_manager.get_modes.return_value = {"Normal": {}, "Custom": {}}
+        self.assertEqual(tool.schema["properties"]["mode"]["enum"], ["Normal", "Custom"])
+
+
+class MultilineShortcutTests(unittest.TestCase):
+    def test_command_return_sends_when_primary_modifier_is_required(self):
+        from gi.repository import Gdk
+        from newelle.ui.widgets.multiline import MultilineEntry
+        entry = Mock(enter_on_ctrl=True)
+        handled = MultilineEntry._on_key_pressed(entry, None, Gdk.KEY_Return, 0, Gdk.ModifierType.META_MASK)
+        self.assertTrue(handled)
+        entry.handle_enter_key.assert_called_once()
+
+    def test_shift_command_return_keeps_a_newline(self):
+        from gi.repository import Gdk
+        from newelle.ui.widgets.multiline import MultilineEntry
+        entry = Mock(enter_on_ctrl=True)
+        handled = MultilineEntry._on_key_pressed(entry, None, Gdk.KEY_Return, 0, Gdk.ModifierType.META_MASK | Gdk.ModifierType.SHIFT_MASK)
+        self.assertFalse(handled)
+        entry.handle_enter_key.assert_not_called()
+
+    def test_command_v_uses_the_image_aware_paste_handler(self):
+        from gi.repository import Gdk
+        from newelle.ui.widgets.multiline import MultilineEntry
+        entry = Mock(enter_on_ctrl=False)
+        handled = MultilineEntry._on_key_pressed(entry, None, Gdk.KEY_v, 0, Gdk.ModifierType.META_MASK)
+        self.assertTrue(handled)
+        entry.handle_paste.assert_called_once()
+
+
 class AudioRecordingTests(unittest.TestCase):
     def test_device_fallback_and_native_sample_rate(self):
         recorder = AudioRecorder()

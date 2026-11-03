@@ -984,6 +984,9 @@ class NewelleController(WorkspaceController):
         if self.chats[chat_id].get("workspace_id") != self.folders[folder_id].get("workspace_id"):
             return
         self.remove_chat_from_folder(chat_id, save=False)
+        # A chat dropped into a folder leaves its branch parent behind:
+        # folder nesting replaces branch nesting in the sidebar.
+        self.chats[chat_id]["branched_from"] = None
         if folder_id in self.folders:
             if chat_id not in self.folders[folder_id]["chat_ids"]:
                 self.folders[folder_id]["chat_ids"].append(chat_id)
@@ -1001,6 +1004,29 @@ class NewelleController(WorkspaceController):
                     if self.ui_controller is not None:
                         GLib.idle_add(self.ui_controller.update_history)
                 return
+
+    def move_chat_to_top_level(self, chat_id: int):
+        """Move a chat to the top level, leaving its folder and its branch parent.
+
+        Used when a chat is dragged away from the chat it was branched from:
+        the chat stops nesting under its parent and becomes standalone.
+        """
+        chat = self.chats.get(chat_id)
+        if chat is None:
+            return
+        changed = False
+        for folder in self.folders.values():
+            if chat_id in folder["chat_ids"]:
+                folder["chat_ids"].remove(chat_id)
+                changed = True
+        if chat.get("branched_from") is not None:
+            chat["branched_from"] = None
+            changed = True
+        if not changed:
+            return
+        self.save_chats()
+        if self.ui_controller is not None:
+            GLib.idle_add(self.ui_controller.update_history)
 
     def get_folder_for_chat(self, chat_id: int):
         """Return the folder_id containing this chat, or None."""
@@ -1759,9 +1785,10 @@ class NewelleController(WorkspaceController):
             result.set_output(_("There is no conversation to compact"))
             return result
         handlers = self._request_handlers()
+        max_tokens, suggested_tokens = self.resolve_context_limits(request_settings, handlers)
         cm = CacheContextManager(
-            max_tokens=request_settings.context_max,
-            suggested_tokens=request_settings.context_suggested,
+            max_tokens=max_tokens,
+            suggested_tokens=suggested_tokens,
             llm_handler=handlers.secondary_llm if request_settings.use_secondary_language_model else handlers.llm,
             checkpoint=self.chats[chat_id].get("context_compaction"),
         )
@@ -1836,6 +1863,10 @@ class NewelleController(WorkspaceController):
                 is_enabled = mode_manager.resolve_tool_enabled(
                     tool.name, is_enabled, mode_name
                 )
+
+            # Memory tools are meaningless without Long Term Memory, whatever the Mode says
+            if tool.tools_group == "Memory" and not request_settings.memory_on:
+                is_enabled = False
 
             if is_enabled:
                 enabled_tools.append(tool)
@@ -2121,6 +2152,17 @@ class NewelleController(WorkspaceController):
             self.settings.set_string("current-profile", profile_name)
         apply_profile_settings(self.settings, profiles, profile_name, SETTINGS_GROUPS)
         return True
+
+    def restore_current_profile(self):
+        """Load the saved values of the current profile into the live settings.
+
+        Profile switches are not persisted to GSettings, so after a restart the
+        stored profile keys can belong to a different profile than
+        ``current-profile``. The saved profile is the source of truth; keeping
+        the stale values would overwrite its own groups on the next save.
+        """
+        profiles = self._load_profiles()
+        apply_profile_settings(self.settings, profiles, self.settings.get_string("current-profile"), SETTINGS_GROUPS)
 
     def update_current_profile(self):
         """Save the live settings into the current profile and the profiles it inherits from"""
@@ -2412,6 +2454,31 @@ class NewelleController(WorkspaceController):
                 count -= 1
         return history
 
+    def resolve_context_limits(self, request_settings, request_handlers):
+        """Effective (max_tokens, suggested_tokens) for context trimming.
+
+        The hard max is the manual context-max setting, or — when context-auto
+        is enabled and the LLM provider's /models endpoint reports a
+        context_length for the selected model (e.g. Fireworks) — the model's
+        context length. The suggested soft target is always a percentage
+        (context-percent) of that max.
+        """
+        max_tokens = request_settings.context_max
+        if getattr(request_settings, "context_auto", False):
+            context_length = None
+            llm = getattr(request_handlers, "llm", None)
+            if llm is not None and hasattr(llm, "get_context_length"):
+                try:
+                    context_length = llm.get_context_length()
+                except Exception:
+                    context_length = None
+            if context_length:
+                max_tokens = context_length
+        suggested_tokens = int(
+            max_tokens * getattr(request_settings, "context_percent", 80) / 100
+        )
+        return max_tokens, suggested_tokens
+
     def _trim_context(
         self,
         history: list[dict[str, str]],
@@ -2431,6 +2498,10 @@ class NewelleController(WorkspaceController):
         # Reserve the current prompt as well as the system prefix.
         prompts_token_count = sum(count_tokens(p) for p in prompts) + count_message_tokens(current_message) + 4
 
+        max_tokens, suggested_tokens = self.resolve_context_limits(
+            request_settings, request_handlers
+        )
+
         embedding = getattr(request_handlers, "embedding", None)
         if request_settings.use_secondary_language_model:
             llm = getattr(request_handlers, "secondary_llm", None)
@@ -2438,8 +2509,8 @@ class NewelleController(WorkspaceController):
             llm = getattr(request_handlers, "llm", None)
 
         cache_cm = CacheContextManager(
-            max_tokens=request_settings.context_max,
-            suggested_tokens=request_settings.context_suggested,
+            max_tokens=max_tokens,
+            suggested_tokens=suggested_tokens,
             llm_handler=llm,
             summarization_enabled=request_settings.context_summarization,
             checkpoint=chat_record.get("context_compaction"),
@@ -2453,8 +2524,8 @@ class NewelleController(WorkspaceController):
                 count = request_settings.memory
                 return history[-count:] if count > 0 else [], None
             cm = ContextManager(
-                max_tokens=request_settings.context_max,
-                suggested_tokens=request_settings.context_suggested,
+                max_tokens=max_tokens,
+                suggested_tokens=suggested_tokens,
                 embedding_handler=embedding,
                 llm_handler=llm,
                 summarization_enabled=request_settings.context_summarization,
@@ -2614,6 +2685,8 @@ class NewelleController(WorkspaceController):
                 enabled = mode_manager.resolve_tool_enabled(
                     tool.name, enabled, mode_name
                 )
+            if tool.tools_group == "Memory" and not request_settings.memory_on:
+                enabled = False
             enabled_tools[tool.name] = enabled
         return self.tools.get_tools_prompt(
             enabled_tools_dict=enabled_tools,
@@ -3316,7 +3389,8 @@ class NewelleController(WorkspaceController):
                 if model.stream_enabled() and not tool_calls and on_message_callback:
                     on_message_callback(response)
                 
-                if not tool_calls or final_synthesis_turn:
+                # A stopped response may still contain tool calls that must not run.
+                if not tool_calls or final_synthesis_turn or stop_generation_event.is_set():
                     final_content = response_text if not tool_calls else text_content
                     msg_uuid = int(uuid_lib.uuid4())
                     assistant_entry = {
@@ -3699,7 +3773,8 @@ class NewelleSettings:
         self.wakeword_energy_threshold = settings.get_int("wakeword-energy-threshold")
         self.context_mode = settings.get_string("context-mode")
         self.context_max = settings.get_int("context-max")
-        self.context_suggested = settings.get_int("context-suggested")
+        self.context_auto = settings.get_boolean("context-auto")
+        self.context_percent = settings.get_int("context-percent")
         self.context_summarization = settings.get_boolean("context-summarization")
         self.font_family = settings.get_string("font-family")
         self.font_size = settings.get_int("font-size")

@@ -33,13 +33,27 @@ class AgentToolsIntegration(NewelleExtension):
         ``get_tools()``, which runs before the UI controller is wired up).
         """
         try:
-            controller = self.ui_controller.window.controller
+            controller = self.controller
         except AttributeError:
             return []
         mm = getattr(controller, "mode_manager", None)
         if mm is None:
             return []
         return list(mm.get_modes().keys())
+
+    def _switch_mode_schema(self):
+        mode = {
+            "type": "string",
+            "description": "Name of the mode to activate.",
+        }
+        available_modes = self._available_modes()
+        if available_modes:
+            mode["enum"] = available_modes
+        return {
+            "type": "object",
+            "properties": {"mode": mode},
+            "required": ["mode"],
+        }
 
     def _subagent_catalog(self):
         manager = getattr(self.controller, "subagent_manager", None)
@@ -608,17 +622,7 @@ class AgentToolsIntegration(NewelleExtension):
                     "Use this when the user asks to change mode or when another mode is better suited to the task."
                 ),
                 func=self._switch_mode,
-                schema={
-                    "type": "object",
-                    "properties": {
-                        "mode": {
-                            "type": "string",
-                            "enum": self._available_modes(),
-                            "description": "Name of the mode to activate.",
-                        },
-                    },
-                    "required": ["mode"],
-                },
+                schema=self._switch_mode_schema,
                 title="Switch Mode",
                 restore_func=self._restore_switch_mode,
                 default_on=True,
