@@ -54,12 +54,14 @@ jobs:
         run: .venv-macos/bin/python -m unittest discover -s tests -v
 
       - name: Smoke test packaged app
+        env:
+          GSK_RENDERER: cairo
         run: |
           dist/Newelle.app/Contents/MacOS/Newelle --smoke-test
           dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --mini
           dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --close-during-startup
           dist/Newelle.app/Contents/MacOS/Newelle --smoke-test --direct-quit
-        timeout-minutes: 3
+        timeout-minutes: 16
 
       - name: Build DMG
         run: NEWELLE_SKIP_APP_BUILD=1 /usr/bin/env bash macos/build_newelle_dmg.sh

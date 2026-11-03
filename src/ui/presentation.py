@@ -7,7 +7,7 @@ from ..utility.system import can_escape_sandbox, is_flatpak, open_website
 
 class PresentationWindow(Adw.Window):
     def __init__(self, title, settings, parent):
-        super().__init__(title=title, deletable=True, modal=True)
+        super().__init__(application=parent.get_application(), title=title, deletable=True, modal=True)
         self.app = parent.get_application()
         self.main_window = parent
         self.controller = parent.controller

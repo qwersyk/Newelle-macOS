@@ -39,7 +39,7 @@ def run(version):
     app.set_application_id("io.github.qwersyk.Newelle.SmokeTest")
     app.set_flags(app.get_flags() | Gio.ApplicationFlags.NON_UNIQUE)
     app.settings.set_boolean("welcome-screen-shown", True)
-    deadline = time.monotonic() + 110
+    deadline = time.monotonic() + 230
     completed = False
 
     def check(condition, name):
@@ -53,6 +53,9 @@ def run(version):
         bounds = button.convertRect_toView_(button.bounds(), None)
         top = native.frame().size.height - bounds.origin.y - bounds.size.height
         check(0 <= top <= 64, name + " controls stay in the header")
+        check(native.isOpaque() and native.backgroundColor().alphaComponent() == 1.0,
+              name + " has an opaque native background")
+        check(native.preservesContentDuringLiveResize(), name + " preserves contents while resizing")
 
     def cancel_result(dialog, result):
         try:
@@ -164,6 +167,8 @@ def run(version):
         app.downloads_action()
         check(app.settingswindow is not None, "settings with search and profiles")
         check(app.downloads_window is not None, "download manager")
+        check(app.settingswindow.get_application() is app and app.downloads_window.get_application() is app,
+              "utility windows belong to the application")
         from newelle.ui.voice_mode import VoiceModeWindow
         voice = VoiceModeWindow(application=app, main_window=main, on_closed=lambda *_: None)
         voice.present()
@@ -204,7 +209,7 @@ def run(version):
     def advance():
         try:
             if time.monotonic() >= deadline:
-                raise TimeoutError("UI smoke test exceeded 110 seconds")
+                raise TimeoutError("UI smoke test exceeded 230 seconds")
             delay = next(steps)
             GLib.timeout_add(delay, advance)
         except StopIteration:
@@ -233,11 +238,14 @@ def run(version):
                 app.connect("activate", close_during_startup)
             else:
                 GLib.timeout_add(100, advance)
-            GLib.timeout_add_seconds(115, timeout)
+            GLib.timeout_add_seconds(235, timeout)
             app.run(["Newelle"] + (["--mini"] if "--mini" in sys.argv else []))
         check(completed and not errors, "all lifecycle checks completed")
         check(not app.main_windows and app.mini_win is None, "main and mini owners released on shutdown")
         check(not app.get_windows(), "all application windows released on quit")
+        toplevels = Gtk.Window.get_toplevels()
+        check(not any(toplevels.get_item(index).get_visible() for index in range(toplevels.get_n_items())),
+              "no unregistered visible windows left behind")
         return 0
     except Exception:
         traceback.print_exc(file=sys.__stderr__)

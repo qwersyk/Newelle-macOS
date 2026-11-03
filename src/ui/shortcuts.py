@@ -4,7 +4,7 @@ from ..utility.system import primary_accel
 
 class Shortcuts(Gtk.Window):
     def __init__(self,app, *args, **kwargs):
-        super().__init__(*args, **kwargs,title=_('Help'))
+        super().__init__(*args, application=app, **kwargs,title=_('Help'))
         self.set_transient_for(app.win)
         self.set_modal(True)
         self.set_titlebar(Adw.HeaderBar(css_classes=["flat"]))

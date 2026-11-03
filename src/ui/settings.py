@@ -60,7 +60,7 @@ PROFILE_PAGE_GROUPS = {
 
 class Settings(Adw.Window):
     def __init__(self,app, controller: NewelleController,headless=False, startup_page=None, popup=False, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, application=app, **kwargs)
         self.app = app
         self.controller = controller
         self.window = getattr(controller.ui_controller, "window", None)

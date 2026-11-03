@@ -217,6 +217,24 @@ class WindowDragTests(unittest.TestCase):
     def test_drag_keeps_mouse_offset_on_negative_display_coordinates(self):
         self.assertEqual(self.module.drag_origin((-1000, 200), (-900, 600), (-800, 650)), (-900, 250))
 
+    def test_failed_native_drag_can_tile_each_screen_edge(self):
+        visible = (-1440, 0, 1440, 875)
+        screen = (-1440, 0, 1440, 900)
+        minimum = (400, 300)
+        for mouse, expected in (
+            ((-1439, 450), (-1440, 0, 720, 875)),
+            ((-1, 450), (-720, 0, 720, 875)),
+            ((-800, 899), visible),
+        ):
+            with self.subTest(mouse=mouse):
+                self.assertEqual(self.module.fallback_snap_frame(visible, screen, mouse, minimum), expected)
+
+    def test_fallback_tiling_respects_window_minimum_and_screen_bounds(self):
+        visible, screen = (0, 0, 1400, 875), (0, 0, 1400, 900)
+        self.assertIsNone(self.module.fallback_snap_frame(visible, screen, (1399, 450), (800, 300)))
+        self.assertIsNone(self.module.fallback_snap_frame(visible, screen, (-20, 450), (400, 300)))
+        self.assertIsNone(self.module.fallback_snap_frame(visible, screen, (700, 450), (400, 300)))
+
 
 class ProcessLimitTests(unittest.TestCase):
     @classmethod

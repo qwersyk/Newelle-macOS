@@ -10,7 +10,7 @@ class ThreadEditing(Gtk.Window):
     REFRESH_INTERVAL_MS = 1000
 
     def __init__(self, app, *args, **kwargs):
-        super().__init__(*args, **kwargs, title=_("Thread editing"))
+        super().__init__(*args, application=app, **kwargs, title=_("Thread editing"))
         self.set_default_size(600, 560)
         self.set_transient_for(app.win)
         self.set_modal(False)

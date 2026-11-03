@@ -202,6 +202,7 @@ class TerminalDialog(Adw.Window):
         self.set_modal(False)
         if parent_window is not None:
             self.set_transient_for(parent_window)
+            self.set_application(parent_window.get_application())
 
         self._confirm_output = confirm_output
         self._allow_close = not confirm_output

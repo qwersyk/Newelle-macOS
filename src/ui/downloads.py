@@ -31,7 +31,7 @@ class DownloadsWindow(Adw.Window):
     }
 
     def __init__(self, app, *args, **kwargs):
-        super().__init__(*args, **kwargs, title=_("Downloads"))
+        super().__init__(*args, application=app, **kwargs, title=_("Downloads"))
         self.app = app
         self.manager = get_download_manager()
         self.set_default_size(700, 560)

@@ -6,6 +6,7 @@ from gi.repository import Gtk, Adw, Gio
 class AddScheduledTaskWindow(Gtk.Window):
     def __init__(self, parent):
         super().__init__(
+            application=parent.get_application(),
             title=_("Add Scheduled Task"),
             transient_for=parent,
             modal=True,
@@ -129,7 +130,7 @@ class AddScheduledTaskWindow(Gtk.Window):
 
 class ScheduledTasksWindow(Gtk.Window):
     def __init__(self, app, *args, **kwargs):
-        super().__init__(*args, **kwargs, title=_("Scheduled Tasks"))
+        super().__init__(*args, application=app, **kwargs, title=_("Scheduled Tasks"))
         self.app = app
         self.main_window = app.win
         self.controller = self.main_window.controller

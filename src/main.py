@@ -36,6 +36,9 @@ class MyApp(Adw.Application):
     def __init__(self, version, **kwargs):
         self.version = version
         super().__init__(flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE, **kwargs)
+        from .utility.macos_window import install_native_window_behavior
+        self.connect("window-added", install_native_window_behavior)
+        Adw.StyleManager.get_default().connect("notify::dark", self._native_appearance_changed)
         self.settings = Gio.Settings.new("io.github.qwersyk.Newelle")
         self.settingswindow = None
         self.mini_win = None
@@ -413,6 +416,16 @@ class MyApp(Adw.Application):
 
     def _has_visible_windows(self) -> bool:
         return any(window.get_mapped() for window in self.get_windows())
+
+    def _native_appearance_changed(self, *_args):
+        GLib.idle_add(self._refresh_native_appearance, priority=GLib.PRIORITY_DEFAULT)
+
+    def _refresh_native_appearance(self):
+        from .utility.macos_window import configure_native_window
+        for window in self.get_windows():
+            if window.get_mapped():
+                configure_native_window(window)
+        return GLib.SOURCE_REMOVE
 
     def _ensure_main_window(self) -> MainWindow:
         if self.win is None:

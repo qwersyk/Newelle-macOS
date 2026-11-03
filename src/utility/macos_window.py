@@ -31,3 +31,26 @@ def float_mini_window(window):
     native.setCollectionBehavior_(
         native.collectionBehavior() | NSWindowCollectionBehaviorMoveToActiveSpace
     )
+
+
+def configure_native_window(window, *_args):
+    """Keep normal windows filled while AppKit animates their frame."""
+    if not window.get_decorated():
+        return
+    native = native_window(window)
+    if native is None:
+        return
+    from AppKit import NSColor
+
+    found, color = window.get_style_context().lookup_color("window_bg_color")
+    background = (NSColor.colorWithRed_green_blue_alpha_(color.red, color.green, color.blue, 1.0)
+                  if found else NSColor.windowBackgroundColor())
+    native.setBackgroundColor_(background)
+    native.setOpaque_(True)
+    native.setPreservesContentDuringLiveResize_(True)
+
+
+def install_native_window_behavior(_application, window):
+    if sys.platform != "darwin":
+        return
+    window.connect("map", configure_native_window)
