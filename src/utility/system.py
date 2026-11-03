@@ -218,14 +218,25 @@ def _delete_to_line_start_text_view(widget) -> bool:
     return True
 
 
-def handle_text_input_key_pressed(widget, keyval, state) -> bool:
+def primary_shortcut_keyval(keyval, keycode=None):
+    """Resolve the Command character rather than the text-layout character."""
+    from gi.repository import Gdk
+    from .macos_keyboard import command_key_character
+
+    character = command_key_character(keycode)
+    if character is not None:
+        keyval = Gdk.unicode_to_keyval(ord(character))
+    return Gdk.keyval_to_lower(keyval)
+
+
+def handle_text_input_key_pressed(widget, keyval, state, keycode=None) -> bool:
     from gi.repository import Gdk, Gtk
 
-    lowered = Gdk.keyval_to_lower(keyval)
     focus = widget
     primary_pressed = has_primary_modifier(state)
 
     if primary_pressed:
+        lowered = primary_shortcut_keyval(keyval, keycode)
         if lowered == Gdk.KEY_c:
             if isinstance(focus, Gtk.Editable):
                 return _copy_editable(focus)
@@ -277,7 +288,7 @@ def install_window_text_input_handlers(window) -> None:
         focus = window.get_focus()
         if focus is None:
             return False
-        return handle_text_input_key_pressed(focus, keyval, state)
+        return handle_text_input_key_pressed(focus, keyval, state, keycode=keycode)
 
     controller.connect("key-pressed", on_key_pressed)
     window.add_controller(controller)

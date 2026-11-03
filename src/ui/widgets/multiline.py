@@ -1,6 +1,6 @@
 from gi.repository import Gtk, Gdk, GLib
 from .. import apply_css_to_widget
-from ...utility.system import handle_text_input_key_pressed, has_primary_modifier
+from ...utility.system import handle_text_input_key_pressed, has_primary_modifier, primary_shortcut_keyval
 
 class MultilineEntry(Gtk.Box):
 
@@ -85,6 +85,9 @@ class MultilineEntry(Gtk.Box):
                 self.handle_enter_key()
                 return True
             return False
+
+        if primary_pressed:
+            keyval = primary_shortcut_keyval(keyval, keycode)
 
         if keyval == Gdk.KEY_v and primary_pressed:
             self.handle_paste()

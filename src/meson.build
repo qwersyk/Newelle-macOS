@@ -265,6 +265,7 @@ utility_sources = [
   'utility/branding.py',
   'utility/file_dialogs.py',
   'utility/macos_window.py',
+  'utility/macos_keyboard.py',
   'utility/util.py',
   'utility/profile_settings.py',
   'utility/audio_recorder.py',

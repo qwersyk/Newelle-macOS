@@ -21,6 +21,7 @@ spec.loader.exec_module(package)
 
 import gi
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GtkSource", "5")
 from newelle.utility.audio_recorder import AudioRecorder
@@ -93,9 +94,109 @@ class MultilineShortcutTests(unittest.TestCase):
         from gi.repository import Gdk
         from newelle.ui.widgets.multiline import MultilineEntry
         entry = Mock(enter_on_ctrl=False)
-        handled = MultilineEntry._on_key_pressed(entry, None, Gdk.KEY_v, 0, Gdk.ModifierType.META_MASK)
+        handled = MultilineEntry._on_key_pressed(entry, None, Gdk.KEY_v, 9, Gdk.ModifierType.META_MASK)
         self.assertTrue(handled)
         entry.handle_paste.assert_called_once()
+
+
+@unittest.skipUnless(sys.platform == "darwin", "Requires macOS keyboard layouts")
+class KeyboardLayoutShortcutTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import ctypes
+        from newelle.utility.macos_keyboard import _keyboard_api
+        cls.carbon, cls.core, _ = _keyboard_api()
+        pointer = ctypes.c_void_p
+        for library, name, result, arguments in (
+            (cls.carbon, "TISCreateInputSourceList", pointer, [pointer, ctypes.c_bool]),
+            (cls.core, "CFArrayGetCount", ctypes.c_long, [pointer]),
+            (cls.core, "CFArrayGetValueAtIndex", pointer, [pointer, ctypes.c_long]),
+            (cls.core, "CFStringGetCString", ctypes.c_bool,
+             [pointer, pointer, ctypes.c_long, ctypes.c_uint32]),
+            (cls.core, "CFRetain", pointer, [pointer]),
+        ):
+            function = getattr(library, name)
+            function.restype, function.argtypes = result, arguments
+        cls.source_list = cls.carbon.TISCreateInputSourceList(None, True)
+        identifier = pointer.in_dll(cls.carbon, "kTISPropertyInputSourceID")
+        cls.sources = {}
+        for index in range(cls.core.CFArrayGetCount(cls.source_list)):
+            source = cls.core.CFArrayGetValueAtIndex(cls.source_list, index)
+            name = ctypes.create_string_buffer(512)
+            cls.core.CFStringGetCString(
+                cls.carbon.TISGetInputSourceProperty(source, identifier),
+                name, len(name), 0x08000100,  # kCFStringEncodingUTF8
+            )
+            cls.sources[name.value.decode()] = source
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.core.CFRelease(cls.source_list)
+
+    def use_layout(self, name):
+        # Supply actual built-in layout data without changing the user's
+        # selected input source or opening any application windows.
+        source = self.sources["com.apple.keylayout." + name]
+        return patch.object(self.carbon, "TISCopyCurrentKeyboardLayoutInputSource",
+                            side_effect=lambda: self.core.CFRetain(source))
+
+    def test_command_a_selects_all_with_native_non_latin_layouts(self):
+        from gi.repository import Gdk
+        from newelle.ui.widgets.multiline import MultilineEntry
+        for layout, character, keycode in (("Russian", "ф", 0), ("Greek", "α", 0),
+                                          ("Arabic", "ش", 0), ("French", "a", 12)):
+            with self.subTest(layout=layout), self.use_layout(layout):
+                entry = MultilineEntry()
+                text = "Привет 👋\nsecond line"
+                entry.set_text(text)
+                handled = entry._on_key_pressed(
+                    None, Gdk.unicode_to_keyval(ord(character)), keycode, Gdk.ModifierType.META_MASK,
+                )
+                self.assertTrue(handled)
+                buffer = entry.input_panel.get_buffer()
+                self.assertEqual(buffer.get_text(*buffer.get_selection_bounds(), False), text)
+
+    def test_native_shortcuts_in_single_line_fields(self):
+        from gi.repository import Gdk, Gtk
+        from newelle.utility.system import handle_text_input_key_pressed
+        entry = Gtk.Entry()
+        entry.set_text("Поиск")
+        with self.use_layout("Russian"):
+            self.assertTrue(handle_text_input_key_pressed(
+                entry, Gdk.KEY_Cyrillic_ef, Gdk.ModifierType.META_MASK, keycode=0,
+            ))
+        self.assertEqual(entry.get_selection_bounds(), (0, len("Поиск")))
+
+    def test_russian_command_v_preserves_image_aware_paste(self):
+        from gi.repository import Gdk
+        from newelle.ui.widgets.multiline import MultilineEntry
+        entry = Mock(enter_on_ctrl=False)
+        with self.use_layout("Russian"):
+            handled = MultilineEntry._on_key_pressed(
+                entry, None, Gdk.KEY_Cyrillic_em, 9, Gdk.ModifierType.META_MASK,
+            )
+        self.assertTrue(handled)
+        entry.handle_paste.assert_called_once()
+
+    def test_french_command_q_does_not_select_all_at_qwerty_a_position(self):
+        from gi.repository import Gdk, Gtk
+        from newelle.utility.system import handle_text_input_key_pressed
+        entry = Gtk.Entry()
+        entry.set_text("Un texte")
+        with self.use_layout("French"):
+            self.assertFalse(handle_text_input_key_pressed(
+                entry, Gdk.KEY_q, Gdk.ModifierType.META_MASK, keycode=0,
+            ))
+        self.assertFalse(entry.get_selection_bounds())
+
+    def test_plain_russian_typing_does_not_select_all(self):
+        from gi.repository import Gdk, Gtk
+        from newelle.utility.system import handle_text_input_key_pressed
+        entry = Gtk.Entry()
+        entry.set_text("Текст")
+        with self.use_layout("Russian"):
+            self.assertFalse(handle_text_input_key_pressed(entry, Gdk.KEY_Cyrillic_ef, 0, keycode=0))
+        self.assertFalse(entry.get_selection_bounds())
 
 
 class AudioRecordingTests(unittest.TestCase):
